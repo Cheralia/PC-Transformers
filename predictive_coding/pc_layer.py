@@ -43,7 +43,7 @@ class PCLayer(nn.Module):
         self.local_lr = local_learning_rate
         self.is_holding_error = is_holding_error
         self.update_bias = update_bias
-        self.clamp_value = 1.0
+        self.clamp_value = 3.0
         self.W_latents = nn.ParameterDict()
         self.use_lateral = True
         self._x_cache = {}
