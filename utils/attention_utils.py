@@ -46,17 +46,27 @@ def apply_standard_attention(q, k, v, mask=None):
     Standard scaled dot-product attention with masking and mixed precision.
     Args:
         q, k, v: Query, Key, Value tensors (B, num_heads, T, head_dim)
-        mask: Optional mask tensor
+        mask: Optional mask tensor, broadcastable to (B, num_heads, T, T)
     Returns:
         attn_output: Output tensor after attention
     """
     with autocast(device_type=device, dtype=torch.float16):
+        # (B, num_heads, T, T)
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (q.size(-1) ** 0.5)
+
         if mask is not None:
-            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
-        attn_weights = torch.softmax(attn_scores, dim=-1)
+            # ensure mask is boolean or float {0,1}, and broadcast correctly
+            # mask == 0 → block (set to -inf before softmax)
+            attn_scores = attn_scores.masked_fill(mask == 0, float("-inf"))
+
+        # compute softmax in float32 for numerical stability
+        attn_weights = torch.softmax(attn_scores.float(), dim=-1).to(q.dtype)
+
+        # apply attention weights to values
         attn_output = torch.matmul(attn_weights, v)
+
     return attn_output
+
 
 def apply_rotary_pos_emb(q, k, seq_len, head_dim, device):
     # Generate rotary position encodings
