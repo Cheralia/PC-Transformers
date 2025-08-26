@@ -57,3 +57,21 @@ def apply_standard_attention(q, k, v, mask=None):
         attn_weights = torch.softmax(attn_scores, dim=-1)
         attn_output = torch.matmul(attn_weights, v)
     return attn_output
+
+def apply_rotary_pos_emb(q, k, seq_len, head_dim, device):
+    # Generate rotary position encodings
+    theta = 10000 ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim)
+    pos = torch.arange(seq_len, device=device).float()
+    freqs = torch.einsum('i,j->ij', pos, 1.0 / theta)
+    emb = torch.cat((freqs, freqs), dim=-1)
+    cos = emb.cos()[None, None, :, :]
+    sin = emb.sin()[None, None, :, :]
+
+    def rotate(x):
+        x1, x2 = x[..., ::2], x[..., 1::2]
+        x_rot = torch.stack((-x2, x1), dim=-1).reshape_as(x)
+        return x_rot
+
+    q_rot = q * cos + rotate(q) * sin
+    k_rot = k * cos + rotate(k) * sin
+    return q_rot, k_rot
