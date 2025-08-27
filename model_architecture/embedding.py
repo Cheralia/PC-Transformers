@@ -16,7 +16,6 @@ class Embedding_Layer(nn.Module):
         super(Embedding_Layer, self).__init__()
 
         self.word_embeddings = nn.Embedding(config.vocab_size, config.n_embed)
-        self.position_embeddings = nn.Embedding(config.block_size, config.n_embed)
         self.rms_norm = nn.RMSNorm(config.n_embed)
         self.dropout = nn.Dropout(config.dropout)
         

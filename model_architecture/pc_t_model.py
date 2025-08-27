@@ -81,7 +81,7 @@ class PCTransformer(nn.Module):
         self.embedding.pc_layer.init_x(
             batch_size=B,
             seq_len= S,
-            layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
+            layer={"word": self.embedding.word_embeddings},
             layer_type="embed",
             input_ids=input_ids,
             position_ids=position_ids,
