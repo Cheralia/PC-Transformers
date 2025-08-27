@@ -55,6 +55,7 @@ class PCLayer(nn.Module):
         self.num_heads = num_heads
         self.n_embed = n_embed
         self.la = la
+        self.layer_type = None
 
     def register_lateral(self, layer_type: str, size: int):
         """
@@ -229,7 +230,7 @@ class PCLayer(nn.Module):
 
             if self.use_lateral:
                 self.register_lateral(layer_type, H_in)
-
+            self.layer_type = layer_type 
                 
 
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:

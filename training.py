@@ -89,8 +89,11 @@ def train(model, dataloader, tokenizer, config, global_step, device):
                 if hasattr(module, 'layer_type') and module.layer_type == 'attn':
                     if getattr(module, 'energy_fn_name', None) == "kld":
                        attn_energy = energy
+                elif hasattr(module, 'layer_type') and module.layer_type == 'linear_output':
+                    if getattr(module, 'energy_fn_name', None) == "ce":
+                        output_energy = energy
                     else:
-                       internal_energies.append(energy)
+                            internal_energies.append(energy)
                 else:
                       internal_energies.append(energy)
                 if hasattr(module, "_head_similarity_avg"):
