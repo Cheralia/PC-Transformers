@@ -111,29 +111,31 @@ class PCLayer(nn.Module):
         if layer_type == "embed":
             if "embed" not in self._x_cache:
                 raise ValueError("Embedding state not initialized. Call init_x first.")
-            x_word, x_pos = self._x_cache["embed"]
+            x_word = self._x_cache["embed"]
+
         else:
             if layer_type not in self._x_cache:
                 raise ValueError(f"{layer_type} state not initialized. Call init_x first.")
             x = self._x_cache[layer_type]
 
         if layer_type == "embed":
-            # Caching for mu_word and mu_pos during inference
+             # Caching for mu_word during inference
             if not hasattr(self, '_embed_cache'):
-                self._embed_cache = {"mu_word": None, "mu_pos": None, "step": -1}
+                self._embed_cache = {"mu_word": None, "step": -1}
             use_cache = (not requires_update) and (self._embed_cache["step"] == t)
-            mu, mu_word, mu_pos = step_embed(
-                t, T, target_activity, layer, layer_type, input_ids, position_ids,
+            mu, mu_word = step_embed(
+                t, T, target_activity, layer, layer_type, input_ids,
                 self.local_lr, self.clamp_value, self.energy_fn_name, self.is_holding_error,
                 requires_update,
-                mu_word_cache=self._embed_cache["mu_word"] if use_cache else None,
-                mu_pos_cache=self._embed_cache["mu_pos"] if use_cache else None
+                mu_word_cache=self._embed_cache["mu_word"] if use_cache else None
             )
             # Update cache if not requires_update or first step
             if not requires_update or t == 0:
                 self._embed_cache["mu_word"] = mu_word
-                self._embed_cache["mu_pos"] = mu_pos
                 self._embed_cache["step"] = t
+                
+            self._x_cache["embed"] = mu_word
+                
         elif layer_type == "attn":
             # Step attention takes arguments strictly in order: t, T, target_activity, x, W_latents, proj_layers, layer_type,
             # local_lr, clamp_value, use_lateral, is_holding_error, energy_fn
@@ -154,8 +156,8 @@ class PCLayer(nn.Module):
 
         if layer_type == "embed":
             # Cache updated x for next step inference
-            self._x_cache["embed"] = (mu_word, mu_pos)
-            return mu_word, mu_pos
+            self._x_cache["embed"] = (mu_word)
+            return mu_word
         else:
             self._x_cache[layer_type] = x
             return x
@@ -187,21 +189,17 @@ class PCLayer(nn.Module):
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         if layer_type == "embed":
-            assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
+            assert input_ids is not None, "Embedding layer requires input_ids"
             
             # Clip input_ids to valid range
             vocab_size = layer["word"].weight.size(0)
             if input_ids.max() >= vocab_size:
                 input_ids = torch.clamp(input_ids, max=vocab_size-1)
             
-            # Position IDs should also be clipped to valid range
-            max_pos = layer["pos"].weight.size(0)
-            if position_ids.max() >= max_pos:
-                position_ids = torch.clamp(position_ids, max=max_pos-1)
-            
+            # Only store word embeddings (RoPE will be applied in attention)
             x_word = layer["word"].weight[input_ids] 
-            x_pos = layer["pos"].weight[position_ids] 
-            self._x_cache["embed"] = (x_word, x_pos)
+            self._x_cache["embed"] = x_word
+            
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
@@ -281,3 +279,4 @@ class PCLayer(nn.Module):
             float: The current local learning rate.
         """
         return self.local_lr
+
