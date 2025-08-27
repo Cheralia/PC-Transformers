@@ -45,19 +45,17 @@ def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.dev
 def step_embed(
     t, T, target, layer, layer_type, input_ids,
     local_lr, clamp_value, energy_fn_name, 
-    is_holding_error, requires_update, 
-    mu_word_cache=None, use_absolute_pos=False, position_ids=None, mu_pos_cache=None
+    is_holding_error, requires_update, mu_word_cache=None
 ):
     """
-    Predictive coding update step for the embedding layer.
-    Modified for Rotary Position Embeddings (RoPE).
-    By default, only word embeddings are used (RoPE is applied later in attention).
+    Predictive coding update step for the embedding layer using only Rotary Positional Embeddings (RoPE).
+    RoPE is applied later in attention, so this layer only returns word embeddings.
+    
     Args:
         t (int): Current inference step.
         T (int): Total number of inference steps.
         target (torch.Tensor): Target activity tensor.
-        layer (dict): Dictionary with embedding layers. Must contain 'word'. 
-                      If use_absolute_pos=True, must also contain 'pos'.
+        layer (dict): Dictionary containing embedding layer with key 'word'.
         layer_type (str): Layer type string.
         input_ids (torch.Tensor): Input token IDs.
         local_lr (float): Local learning rate.
@@ -65,19 +63,16 @@ def step_embed(
         energy_fn_name (str): Name of energy function.
         is_holding_error (bool): Whether to accumulate errors.
         requires_update (bool): Whether to update weights.
-        mu_word_cache: Optional cached word embeddings for inference.
-        use_absolute_pos (bool): Whether to also add learned positional embeddings.
-        position_ids (torch.Tensor): Required if use_absolute_pos=True.
-        mu_pos_cache: Optional cached positional embeddings.
+        mu_word_cache (torch.Tensor, optional): Cached embeddings for inference.
+
     Returns:
-        tuple: (mu, mu_word, mu_pos or None)
+        tuple: (mu, mu_word)
     """
     word_layer = layer["word"]
     vocab_size = word_layer.weight.size(0)
 
     # Clip input ids to vocab size
-    if input_ids.max() >= vocab_size:
-        input_ids = torch.clamp(input_ids, max=vocab_size-1)
+    input_ids = torch.clamp(input_ids, max=vocab_size-1)
 
     # Get embeddings
     if requires_update or mu_word_cache is None:
@@ -85,46 +80,28 @@ def step_embed(
     else:
         mu_word = mu_word_cache
 
-    mu_pos = None
-    if use_absolute_pos:
-        assert position_ids is not None, "position_ids required if use_absolute_pos=True"
-        pos_layer = layer["pos"]
-        max_pos = pos_layer.weight.size(0)
-        if position_ids.max() >= max_pos:
-            position_ids = torch.clamp(position_ids, max=max_pos-1)
-
-        if requires_update or mu_pos_cache is None:
-            mu_pos = pos_layer(position_ids)
-        else:
-            mu_pos = mu_pos_cache
-
-    # If using rotary, just return token embeddings (position is handled in attention)
-    mu = mu_word if not use_absolute_pos else (mu_word + mu_pos)
+    # RoPE does not modify embeddings here, so mu = mu_word
+    mu = mu_word
 
     if not requires_update:
         if t == T - 1:
             finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
-        return mu, mu_word, mu_pos
+        return mu, mu_word
 
-    # Error & update
+    # Predictive coding update
     error = target - mu
     update = torch.clamp(error, -clamp_value, clamp_value)
 
-    if requires_update:
-        with torch.no_grad():
-            flat_input_ids = input_ids.reshape(-1)
-            flat_update = update.reshape(-1, update.size(-1))
-
-            word_layer.weight.data.index_add_(0, flat_input_ids, local_lr * flat_update)
-
-            if use_absolute_pos:
-                flat_position_ids = position_ids.reshape(-1)
-                pos_layer.weight.data.index_add_(0, flat_position_ids, local_lr * flat_update)
+    with torch.no_grad():
+        flat_input_ids = input_ids.reshape(-1)
+        flat_update = update.reshape(-1, update.size(-1))
+        word_layer.weight.data.index_add_(0, flat_input_ids, local_lr * flat_update)
 
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
 
-    return mu, mu_word, mu_pos
+    return mu, mu_word
+
 
     
 def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update):
