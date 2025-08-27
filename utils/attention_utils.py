@@ -68,14 +68,65 @@ def apply_standard_attention(q, k, v, mask=None):
     return attn_output
 
 
+
+def precompute_freqs_cis(dim: int, seq_len: int, theta: float = 10000.0):
+    """
+    Precompute rotary positional embeddings frequencies as complex exponentials.
+
+    Args:
+        dim (int): Head dimension (embedding size per attention head)
+        seq_len (int): Maximum sequence length
+        theta (float): Scaling factor (default 10000.0)
+
+    Returns:
+        torch.Tensor: Complex tensor of shape (seq_len, dim) for RoPE
+    """
+    # Only half of the dimension is needed for interleaving
+    dim_half = dim // 2
+    freqs = 1.0 / (theta ** (torch.arange(0, dim_half).float() / dim_half))  # (dim//2,)
+    positions = torch.arange(seq_len).float()  # (seq_len,)
+    angles = torch.outer(positions, freqs)
+    freqs_cis = torch.polar(torch.ones_like(angles), angles)  # (seq_len, dim//2), complex64
+    # Interleave to full dim
+    freqs_cis = torch.cat([freqs_cis, freqs_cis], dim=-1)  # (seq_len, dim)
+    return freqs_cis
+
+def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
+    """
+    Reshape precomputed frequencies for broadcasting with Q/K tensors.
+
+    Args:
+        freqs_cis (torch.Tensor): (seq_len, head_dim)
+        x (torch.Tensor): Query/Key tensor of shape (B, T, H, head_dim)
+
+    Returns:
+        torch.Tensor: Reshaped tensor (1, T, 1, head_dim) for broadcasting
+    """
+    B, T, H, head_dim = x.shape
+    assert freqs_cis.shape == (T, head_dim), f"Expected freqs shape (T, head_dim), got {freqs_cis.shape}"
+    # reshape for broadcasting
+    return freqs_cis.view(1, T, 1, head_dim)
+
+
 def apply_rotary_pos_emb(q, k, seq_len, head_dim, device):
-    # Generate rotary position encodings
-    theta = 10000 ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim)
-    pos = torch.arange(seq_len, device=device).float()
-    freqs = torch.einsum('i,j->ij', pos, 1.0 / theta)
-    emb = torch.cat((freqs, freqs), dim=-1)
-    cos = emb.cos()[None, None, :, :]
-    sin = emb.sin()[None, None, :, :]
+    """
+    Apply Rotary Positional Embeddings (RoPE) to query and key tensors.
+
+    Args:
+        q (torch.Tensor): Query tensor of shape (B, T, num_heads, head_dim)
+        k (torch.Tensor): Key tensor of shape (B, T, num_heads, head_dim)
+        seq_len (int): Sequence length (T)
+        head_dim (int): Dimension of each attention head
+        device (torch.device): Device for computations
+
+    Returns:
+        tuple: (q_rot, k_rot) tensors after applying RoPE, same shape as inputs
+    """
+    freqs_cis = precompute_freqs_cis(head_dim, seq_len).to(device)
+    freqs_cis = reshape_for_broadcast(freqs_cis, q)
+
+    cos = freqs_cis.real
+    sin = freqs_cis.imag
 
     def rotate(x):
         x1, x2 = x[..., ::2], x[..., 1::2]
