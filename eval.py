@@ -70,22 +70,32 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
 
         internal_energies = []
         output_energy = None
-
+        attn_energy=None
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
                 energy = module.get_energy()
-                if energy is None or (isinstance(energy, float) and math.isnan(energy)):
-                    continue
-
-                if module is output_pc_layer:
-                    output_energy = energy
+                if hasattr(module, 'layer_type') and module.layer_type == 'attn':
+                    if getattr(module, 'energy_fn_name', None) == "kld":
+                       attn_energy = energy
+                elif hasattr(module, 'layer_type') and module.layer_type == 'linear_output':
+                    if getattr(module, 'energy_fn_name', None) == "ce":
+                        output_energy = energy
+                    else:
+                            internal_energies.append(energy)
                 else:
-                    internal_energies.append(energy)
+                      internal_energies.append(energy)
+                if hasattr(module, "_head_similarity_avg"):
+                    _ = module._head_similarity_avg
+                if hasattr(module, "_head_similarity_max"):
+                    _ = module._head_similarity_max
 
-        avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
-        avg_output_energy = output_energy if output_energy is not None else ce_loss.item()
-
-        batch_energy = alpha * avg_internal_energy + beta * avg_output_energy
+        tot_internal_energy = 0.5 * sum(internal_energies)  if internal_energies else ce_loss.item()
+        batch_energy = tot_internal_energy
+        
+        if attn_energy is not None:
+           batch_energy += attn_energy
+        if output_energy is not None:
+           batch_energy += output_energy
         total_energy += batch_energy
         batch_count += 1
 
@@ -125,7 +135,7 @@ def main():
         num_epochs=1,
         update_bias=False,
         internal_energy_fn_name="pc_e", 
-        output_energy_fn_name="kld",
+        output_energy_fn_name="pc_e",
         eos_token_id = tokenizer.eos_token_id,
         combined_internal_weight=0.3,
         combined_output_weight=0.7,
