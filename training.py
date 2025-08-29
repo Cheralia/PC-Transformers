@@ -101,7 +101,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
                 if hasattr(module, "_head_similarity_max"):
                     _ = module._head_similarity_max
 
-        tot_internal_energy = 0.5 * sum(internal_energies)  if internal_energies else ce_loss.item()
+        tot_internal_energy = sum(internal_energies)/len(internal_energies)  if internal_energies else ce_loss.item()
         batch_energy = tot_internal_energy
         
         if attn_energy is not None:
