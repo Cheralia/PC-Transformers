@@ -120,6 +120,8 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         energy_fn_name (str): Name of energy function.
         update_bias (bool): Whether to update bias.
         requires_update (bool): Whether to update weights.
+        td_err: this is the error that comes from the above layer prediction.
+        bu_err: an error that comes from the bottom layer.
     Returns:
         tuple: (updated activity tensor, predicted output tensor)
     """
