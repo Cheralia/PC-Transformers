@@ -93,7 +93,7 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
 
             flat_position_ids = position_ids.reshape(-1)
             delta = local_lr * flat_update
-            delta = torch.clamp(delta, -clamp_value, clamp_value)
+            delta = torch.clamp(delta, -0.01, 0.01)
             word_layer.weight.data.index_add_(0, flat_input_ids, delta)
             pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
             
@@ -162,11 +162,11 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     # PC Update W_layer
     if requires_update:
         delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x.detach())
-        delta_W = torch.clamp(delta_W, -0.1, 0.1)
+        delta_W = torch.clamp(delta_W, -0.01, 0.01)
         layer.weight.data.add_(delta_W)
         if layer.bias is not None and update_bias:
             delta_b = local_lr * bu_err.mean(dim=(0, 1))
-            delta_b = torch.clamp(delta_b, -0.1, 0.1)
+            delta_b = torch.clamp(delta_b, -0.01, 0.01)
             layer.bias.data.add_(delta_b)
 
     x = torch.clamp(x, -clamp_value, clamp_value)
@@ -246,7 +246,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
                 proj.weight.data.add_(delta_W)
                 if proj.bias is not None and update_bias:
                     delta_b = local_lr * bu_err.mean(dim=(0, 1))
-                    delta_b = torch.clamp(delta_b, -0.1, 0.1)
+                    delta_b = torch.clamp(delta_b, -0.01, 0.01)
                     delta_b = delta_b.view(-1)
                     proj.bias.data.add_(delta_b)
  
