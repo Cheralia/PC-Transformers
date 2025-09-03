@@ -17,6 +17,7 @@ from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.device_utils import setup_device, cleanup_memory
+import psutil
 
 """
 This script trains the predictive coding transformer model on the provided dataset.
@@ -113,21 +114,32 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         batch_count += 1
 
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
-
-        if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
-
         reset_pc_modules(model)
         cleanup_memory()
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    end_time = time.time()
-    elapsed_time = end_time - start_time
+            
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        end_time = time.time()
+        elapsed_time = end_time - start_time
 
-    avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
-    avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
-    avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
-    throughput = total_tokens / elapsed_time
+        avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
+        avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
+        avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
+        throughput = total_tokens / elapsed_time
+        
+        if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f} | throughput:{throughput:.4f} tokens/sec")
+        
+    if torch.cuda.is_available():
+            print(f"Allocated GPU memory: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB")
+            print(f"Max allocated GPU memory: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
+            print(f"Reserved GPU memory: {torch.cuda.memory_reserved() / 1024 ** 2:.2f} MB")
+            print(f"Max reserved GPU memory: {torch.cuda.max_memory_reserved() / 1024 ** 2:.2f} MB")
+    else:
+            process = psutil.Process(os.getpid())
+            print(f"CPU memory usage: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
+  
     return avg_energy, avg_perplexity, global_step
 
 
@@ -142,42 +154,19 @@ def main():
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
     #gpu
-    config = GPTConfig(
-        vocab_size = vocab_size,
-        block_size= 448, 
-        peak_learning_rate= 2e-5,
-        warmup_steps= 217,
-        n_embed=592,
-        dropout= 0.24684719512514441,
-        local_learning_rate= 0.0,
-        T= 10,
-        is_holding_error = True,
-        num_heads=16,
-        n_blocks=6,
-        num_epochs= 20,
-        update_bias= True,
-        use_lateral = True,
-        internal_energy_fn_name="mse",
-        output_energy_fn_name="kld",
-        eos_token_id=tokenizer.eos_token_id,
-        combined_internal_weight=0.3,
-        combined_output_weight=0.7,
-        use_flash_attention=True  
-    )
-    #cpu
     # config = GPTConfig(
     #     vocab_size = vocab_size,
-    #     block_size= 256, 
+    #     block_size= 448, 
     #     peak_learning_rate= 2e-5,
     #     warmup_steps= 217,
-    #     n_embed=64,
+    #     n_embed=592,
     #     dropout= 0.24684719512514441,
     #     local_learning_rate= 0.0,
-    #     T= 1,
+    #     T= 10,
     #     is_holding_error = True,
-    #     num_heads=1,
-    #     n_blocks=1,
-    #     num_epochs= 1,
+    #     num_heads=16,
+    #     n_blocks=6,
+    #     num_epochs= 20,
     #     update_bias= True,
     #     use_lateral = True,
     #     internal_energy_fn_name="mse",
@@ -187,6 +176,29 @@ def main():
     #     combined_output_weight=0.7,
     #     use_flash_attention=True  
     # )
+    #cpu
+    config = GPTConfig(
+        vocab_size = vocab_size,
+        block_size= 256, 
+        peak_learning_rate= 2e-5,
+        warmup_steps= 217,
+        n_embed=64,
+        dropout= 0.24684719512514441,
+        local_learning_rate= 0.0,
+        T= 1,
+        is_holding_error = True,
+        num_heads=1,
+        n_blocks=1,
+        num_epochs= 1,
+        update_bias= True,
+        use_lateral = True,
+        internal_energy_fn_name="mse",
+        output_energy_fn_name="kld",
+        eos_token_id=tokenizer.eos_token_id,
+        combined_internal_weight=0.3,
+        combined_output_weight=0.7,
+        use_flash_attention=True  
+    )
     
     model = PCTransformer(config).to(device)
 
@@ -204,12 +216,12 @@ def main():
     global_step = 0
     train_energies = []
     val_energies = []
-    start_time = time.time()
     rank = dist.get_rank() if dist.is_initialized() else 0
+    start_time = time.time()
+    if torch.cuda.is_available():
+            torch.cuda.synchronize()
     if rank == 0:
         print("========== Training started ==========", flush=True)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
         total_params = sum(p.numel() for p in model.parameters())
         print(f"{total_params / 1e6:.2f} M parameters", flush=True)
 
@@ -255,7 +267,7 @@ def main():
         if rank == 0:
             print(f"Epoch {epoch + 1}/{config.num_epochs} | "
                   f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
-                  f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}| Throughput: {throughput:.2f} tokens/sec")
+                  f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
 
             if (epoch + 1) % 5 == 0 or epoch == config.num_epochs - 1:
                 os.makedirs("checkpoints", exist_ok=True)
