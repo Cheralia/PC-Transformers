@@ -97,7 +97,6 @@ def train(model, dataloader, tokenizer, config, global_step, device):
                     _ = module._head_similarity_max
 
         avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
-        avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()  
         batch_energy = avg_internal_energy
         
         if output_energy is not None:
