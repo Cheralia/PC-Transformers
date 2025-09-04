@@ -90,6 +90,8 @@ def train(model, dataloader, tokenizer, config, global_step, device):
                         output_energy = energy
                     else:
                         internal_energies.append(energy)
+                else:
+                    internal_energies.append(energy)
 
                 if hasattr(module, "_head_similarity_avg"):
                     _ = module._head_similarity_avg
