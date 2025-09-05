@@ -55,16 +55,19 @@ def apply_standard_attention(q, k, v, mask=None):
     with autocast(device_type=device, dtype=torch.float16):
         # (B, num_heads, T, T)
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (q.size(-1) ** 0.5)
-
+        
+        print("[DEBUG] Attention scores BEFORE masking:\n", attn_scores[0,0,:10,:10].detach().cpu())
+        print(f"[DEBUG] Scores BEFORE masking: min={attn_scores.min().item():.3f}, "
+            f"max={attn_scores.max().item():.3f}, "
+            f"mean={attn_scores.mean().item():.3f}")
+         
         if mask is not None:
-            # ensure mask is boolean or float {0,1}, and broadcast correctly
-            # mask == 0 → block (set to -inf before softmax)
-            attn_scores = attn_scores.masked_fill(mask == 0, float("-inf"))
-
-        # compute softmax in float32 for numerical stability
-        attn_weights = torch.softmax(attn_scores.float(), dim=-1).to(q.dtype)
-
-        # apply attention weights to values
+            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+            print("[DEBUG] Scores AFTER masking (10x10 slice):\n", attn_scores[0,0,:10,:10].detach().cpu())
+            print(f"[DEBUG] AFTER masking stats: min={attn_scores.min().item():.3f}, "
+              f"max={attn_scores.max().item():.3f}, mean={attn_scores.mean().item():.3f}")
+            
+        attn_weights = torch.softmax(attn_scores, dim=-1)
         attn_output = torch.matmul(attn_weights, v)
 
     return attn_output
