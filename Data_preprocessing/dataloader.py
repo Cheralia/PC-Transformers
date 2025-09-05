@@ -1,20 +1,36 @@
 
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, Subset
 from Data_preprocessing.datasets.merged_sets import TokenizedDataset
 from Data_preprocessing.config import Config
 from utils.model_utils import pad_collate_fn, load_tokenizer
 
-def get_datasets():
+def get_datasets(sample_ratio: float = None, sample_size: int = None, seed: int = 42):
     train_dataset = TokenizedDataset("train", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
     valid_dataset = TokenizedDataset("valid", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
     test_dataset = TokenizedDataset("test", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
 
+    if sample_ratio or sample_size:
+        rng = np.random.default_rng(seed)
+
+        def subset(dataset, ratio=None, size=None):
+            n = len(dataset)
+            if ratio:
+                size = int(n * ratio)
+            indices = rng.choice(n, size, replace=False).tolist()
+            return Subset(dataset, indices)
+
+        train_dataset = subset(train_dataset, sample_ratio, sample_size)
+        valid_dataset = subset(valid_dataset, sample_ratio, sample_size)
+        test_dataset  = subset(test_dataset,  sample_ratio, sample_size)
+
     return train_dataset, valid_dataset, test_dataset
 
-def get_loaders(distributed: bool = False):
+
+
+def get_loaders(distributed: bool = False, sample_ratio: float = None, sample_size: int = None):
     tokenizer = load_tokenizer()
     pad_token_id = tokenizer.pad_token_id
-    train_dataset, valid_dataset, test_dataset = get_datasets()
+    train_dataset, valid_dataset, test_dataset = get_datasets(sample_ratio, sample_size)
     
     if distributed:
         train_sampler = DistributedSampler(train_dataset)
@@ -29,7 +45,7 @@ def get_loaders(distributed: bool = False):
         sampler=train_sampler,
         shuffle=(train_sampler is None),  
         num_workers=Config.num_workers,
-        pin_memory=True,                            
+        pin_memory=True,
         collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id),
         persistent_workers=Config.num_workers > 0,
         drop_last=True
