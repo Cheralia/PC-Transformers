@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 import gc
+from torch.amp import autocast
+from contextlib import nullcontext
 from predictive_coding.config import GPTConfig
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
 
@@ -62,6 +64,9 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     """
     word_layer = layer["word"]
     pos_layer = layer["pos"]
+    
+    use_amp = target.is_cuda
+    autocast_ctx = autocast('cuda') if use_amp else nullcontext()
 
     # Clip input_ids and position_ids to valid ranges
     vocab_size = word_layer.weight.size(0)
@@ -71,21 +76,25 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     max_pos = pos_layer.weight.size(0)
     if position_ids.max() >= max_pos:
         position_ids = torch.clamp(position_ids, max=max_pos-1)
+        
+    
+    with autocast_ctx:
+        if requires_update or mu_word_cache is None or mu_pos_cache is None:
+            mu_word = word_layer(input_ids)
+            mu_pos = pos_layer(position_ids)
+        else:
+            mu_word = mu_word_cache
+            mu_pos = mu_pos_cache
+        mu = mu_word + mu_pos
 
-    if requires_update or mu_word_cache is None or mu_pos_cache is None:
-        mu_word = word_layer(input_ids)
-        mu_pos = pos_layer(position_ids)
-    else:
-        mu_word = mu_word_cache
-        mu_pos = mu_pos_cache
-    mu = mu_word + mu_pos
-    error = target - mu
-    if not requires_update:
-        if t == T - 1:
-            finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
-        return mu, mu_word, mu_pos, error
- 
-    update = torch.clamp(error, -clamp_value, clamp_value)
+        if not requires_update:
+            if t == T - 1:
+                finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
+            return mu, mu_word, mu_pos
+
+        error = target - mu
+        update = torch.clamp(error, -clamp_value, clamp_value)
+        
     if requires_update: 
         with torch.no_grad():
             flat_input_ids = input_ids.reshape(-1)
@@ -127,9 +136,13 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         tuple: (updated activity tensor, predicted output tensor)
     """
     device = x.device
-    mu = layer(x)
-    if layer_type == "fc1":
-        mu = F.gelu(mu)
+    use_amp = target.is_cuda
+    autocast_ctx = autocast('cuda') if use_amp else nullcontext()
+    
+    with autocast_ctx:
+        mu = layer(x)
+        if layer_type == "fc1":
+            mu = F.gelu(mu)
 
     bu_err = target - mu
     if td_err is not None:
@@ -143,11 +156,11 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     else:
         error_proj = error  
 
-    if use_lateral and layer_type in W_latents:
-        W_latent = W_latents[layer_type].to(device) 
-        x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
-        delta_x = error_proj + x_latent
-        x = x + local_lr * delta_x
+        if use_lateral and layer_type in W_latents:
+            W_latent = W_latents[layer_type].to(device) 
+            x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
+            delta_x = error_proj + x_latent
+            x = x + local_lr * delta_x
 
         if requires_update:
             anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
@@ -181,23 +194,28 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         q_proj = proj_layers.get("q_proj", None)
         k_proj = proj_layers.get("k_proj", None)
         v_proj = proj_layers.get("v_proj", None)
+        assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"    
         
-        assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"        
-        Q= q_proj(x)
-        K= k_proj(x)
-        V= v_proj(x)
+        use_amp = target.is_cuda
+        autocast_ctx = autocast('cuda') if use_amp else nullcontext()
+        
         batch_size, seq_len, embed_dim = target.shape
         head_dim = n_embed // num_heads
         la = la * math.sqrt(1.0 / head_dim)
 
-        Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-        K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-        V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+        with autocast_ctx:      
+            Q= q_proj(x)
+            K= k_proj(x)
+            V= v_proj(x)
+            
+            Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+            K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+            V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
 
-        if flash:
-            mu_heads = apply_flash_attention(Q, K, V)
-        else:
-            mu_heads = apply_standard_attention(Q, K, V)
+            if flash:
+                mu_heads = apply_flash_attention(Q, K, V)
+            else:
+                mu_heads = apply_standard_attention(Q, K, V)
 
         dvl_grad = compute_DVL(mu_heads, requires_update)
         if dvl_grad is not None:
