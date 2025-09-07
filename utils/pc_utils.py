@@ -86,19 +86,17 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
             mu_word = mu_word_cache
             mu_pos = mu_pos_cache
         mu = mu_word + mu_pos
-
+        error = target - mu
         if not requires_update:
             if t == T - 1:
                 finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
             return mu, mu_word, mu_pos, error
 
-        error = target - mu
-        update = torch.clamp(error, -clamp_value, clamp_value)
         
-    if requires_update: 
-        with torch.no_grad():
+        if requires_update: 
+           with torch.no_grad():
             flat_input_ids = input_ids.reshape(-1)
-            flat_update = update.reshape(-1, update.size(-1))
+            flat_update = error.reshape(-1, error.size(-1))
 
             flat_position_ids = position_ids.reshape(-1)
             delta = local_lr * flat_update
@@ -106,10 +104,10 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
             word_layer.weight.data.index_add_(0, flat_input_ids, delta)
             pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
             
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
+        if t == T - 1:
+           finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
   
-    return mu, mu_word, mu_pos, error
+        return mu, mu_word, mu_pos, error
     
 def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, td_err):
     """
@@ -143,8 +141,11 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         mu = layer(x)
         if layer_type == "fc1":
             mu = F.gelu(mu)
-
-    bu_err = target - mu
+    if layer_type=="linear_output":
+        bu_err= target - F.softmax(mu, dim=-1) 
+    else:
+        bu_err = target - mu
+        
     if td_err is not None:
          td_err= td_err @layer.weight.T # project the error 
          error= bu_err- td_err
