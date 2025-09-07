@@ -90,7 +90,7 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
         if not requires_update:
             if t == T - 1:
                 finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
-            return mu, mu_word, mu_pos
+            return mu, mu_word, mu_pos, error
 
         error = target - mu
         update = torch.clamp(error, -clamp_value, clamp_value)
@@ -156,11 +156,11 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     else:
         error_proj = error  
 
-        if use_lateral and layer_type in W_latents:
-            W_latent = W_latents[layer_type].to(device) 
-            x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
-            delta_x = error_proj + x_latent
-            x = x + local_lr * delta_x
+    if use_lateral and layer_type in W_latents:
+        W_latent = W_latents[layer_type].to(device) 
+        x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
+        delta_x = error_proj + x_latent
+        x = x + local_lr * delta_x
 
         if requires_update:
             anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
@@ -168,7 +168,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
             W_latents[layer_type].data = F.normalize(W_latents[layer_type].data, p=2, dim=1)
     
     else:
-        x= x + local_lr * error 
+         x= x + local_lr * error 
     
     x = torch.clamp(x, clamp_value, clamp_value)
     
