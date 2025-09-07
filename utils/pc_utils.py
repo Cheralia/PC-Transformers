@@ -93,8 +93,8 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
             return mu, mu_word, mu_pos, error
 
         
-        if requires_update: 
-           with torch.no_grad():
+    if requires_update: 
+        with torch.no_grad():
             flat_input_ids = input_ids.reshape(-1)
             flat_update = error.reshape(-1, error.size(-1))
 
@@ -104,10 +104,10 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
             word_layer.weight.data.index_add_(0, flat_input_ids, delta)
             pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
             
-        if t == T - 1:
+    if t == T - 1:
            finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
   
-        return mu, mu_word, mu_pos, error
+    return mu, mu_word, mu_pos, error
     
 def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, td_err):
     """
@@ -141,37 +141,35 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         mu = layer(x)
         if layer_type == "fc1":
             mu = F.gelu(mu)
-    if layer_type=="linear_output":
-        bu_err= target - F.softmax(mu, dim=-1) 
-    else:
+    
         bu_err = target - mu
         
-    if td_err is not None:
-         td_err= td_err @layer.weight.T # project the error 
-         error= bu_err- td_err
-    else:
-        error= bu_err     
+        if td_err is not None:
+           td_err= td_err @layer.weight.T # project the error 
+           error= bu_err- td_err
+        else:
+           error= bu_err     
         
-    if layer.weight.shape[0] != layer.weight.shape[1]:
-        error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  
-    else:
-        error_proj = error  
+        if layer.weight.shape[0] != layer.weight.shape[1]:
+           error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  
+        else:
+           error_proj = error  
 
-    if use_lateral and layer_type in W_latents:
-        W_latent = W_latents[layer_type].to(device) 
-        x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
-        delta_x = error_proj + x_latent
-        x = x + local_lr * delta_x
+        if use_lateral and layer_type in W_latents:
+           W_latent = W_latents[layer_type].to(device) 
+           x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
+           delta_x = error_proj + x_latent
+           x = x + local_lr * delta_x
 
-        if requires_update:
-            anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents[layer_type] = W_latents[layer_type] + local_lr * anti_hebbian_latent
-            W_latents[layer_type].data = F.normalize(W_latents[layer_type].data, p=2, dim=1)
+           if requires_update:
+              anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+              W_latents[layer_type] = W_latents[layer_type] + local_lr * anti_hebbian_latent
+              W_latents[layer_type].data = F.normalize(W_latents[layer_type].data, p=2, dim=1)
     
-    else:
-         x= x + local_lr * error 
+        else:
+          x= x + local_lr * error 
     
-    x = torch.clamp(x, clamp_value, clamp_value)
+        x = torch.clamp(x, clamp_value, clamp_value)
     
     # PC Update W_layer
     if requires_update:
@@ -218,24 +216,24 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             else:
                 mu_heads = apply_standard_attention(Q, K, V)
 
-        dvl_grad = compute_DVL(mu_heads, requires_update)
-        if dvl_grad is not None:
-            dvl_grad = dvl_grad.to(device)
-        dvl_norm = dvl_grad.norm().item() if dvl_grad is not None else 0.0
-        similarity = get_head_similarity(mu_heads)
-        mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
+            dvl_grad = compute_DVL(mu_heads, requires_update)
+            if dvl_grad is not None:
+               dvl_grad = dvl_grad.to(device)
+            dvl_norm = dvl_grad.norm().item() if dvl_grad is not None else 0.0
+            similarity = get_head_similarity(mu_heads)
+            mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
-        bu_err = target - mu  # B, T, D
-        if td_err is not None:
-         error= bu_err - td_err
-        else:
-            error = bu_err  
+            bu_err = target - mu  # B, T, D
+            if td_err is not None:
+               error= bu_err - td_err
+            else:
+                error = bu_err  
           
-        if dvl_grad is not None:
-            B, T, H, D = dvl_grad.shape
-            dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
-            dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
-            error = error + la * dvl_projected
+            if dvl_grad is not None:
+               B, T, H, D = dvl_grad.shape
+               dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
+               dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
+               error = error + la * dvl_projected
         
         if layer_instance is not None:
             setattr(layer_instance, '_head_similarity', similarity)
