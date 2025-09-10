@@ -248,8 +248,6 @@ class PCTransformer(nn.Module):
 
             # Synchronize all parallel tasks
             synchronize_execution(use_cuda, streams_or_futures)
-
-        output_x = self.output.pc_layer.get_x("linear_output")
-        logits = output_x @ self.output.output.weight.T + self.output.output.bias
+        logits = self.output.pc_layer.get_mu("linear_output")
         return logits
     
