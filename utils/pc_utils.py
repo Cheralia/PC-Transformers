@@ -150,8 +150,11 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
             mu = F.gelu(mu)
         elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
               mu = layer_norm(mu)
-            
-        bu_err = target - mu 
+        if layer_type=="linear_output":
+          bu_err= target - F.softmax(mu, dim=-1) 
+        else:    
+          bu_err = target - mu 
+          
         error_proj= bu_err @layer.weight # project the error 
        
         if td_err is not None:
