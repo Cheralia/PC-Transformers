@@ -142,6 +142,8 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     with autocast_ctx:
         if layer_norm is not None and layer_type == "fc1":
            x = layer_norm(x)
+        elif layer_type == "fc2":
+           x = F.gelu(x)
            
         mu = layer(x)
         if layer_type == "fc1":
