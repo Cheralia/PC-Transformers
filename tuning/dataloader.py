@@ -38,11 +38,14 @@ def create_subset_loaders(batch_size, distributed=True):
     return train_subset_loader, valid_subset_loader
 
 def get_dynamic_batch_size(n_embed, block_size):
-    """Calculate optimal batch size based on model size"""
+    """Calculate optimal batch size based on model size, clamped to 8–16 for small datasets."""
     if torch.cuda.is_available():
         memory = torch.cuda.get_device_properties(0).total_memory
-        usable_mem = memory - 1.5 * (1024**3) 
+        usable_mem = memory * 0.5 
         sequence_mem = block_size * n_embed * 4
-        return max(4, min(24, int(usable_mem / (sequence_mem * 3000))))
+        estimated_batch = int(usable_mem / (sequence_mem * 3000))
+        batch_size = max(8, min(16, estimated_batch))
     else:
-        return max(4, min(12, 8))
+         batch_size = 8  # CPU fallback
+    
+    return batch_size
