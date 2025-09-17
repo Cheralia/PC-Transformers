@@ -224,8 +224,8 @@ def main():
     if use_ddp and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
 
-    tokenizer = load_tokenizer()
-    vocab_size = len(tokenizer)
+    # tokenizer = load_tokenizer()
+    # vocab_size = len(tokenizer)
     rank = dist.get_rank() if dist.is_initialized() else 0
 
     best_config = load_best_config()   
