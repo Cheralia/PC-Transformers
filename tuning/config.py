@@ -5,27 +5,27 @@ logger = logging.getLogger(__name__)
 
 def get_dynamic_model_config(trial, vocab_size, flash=False):
     """Get model configuration with dynamic parameter combinations, including flash attention flag."""
-    n_embed = trial.suggest_int("n_embed", 64, 768, step=16)
+    n_embed = trial.suggest_int("n_embed", 64, 80, step=16)
 
-    valid_heads = [h for h in range(4, min(16, n_embed // 12) + 1) if n_embed % h == 0 and 12 <= n_embed // h <= 128]
+    valid_heads = [h for h in range(4, min(4, n_embed // 12) + 1) if n_embed % h == 0 and (n_embed // h) >= 16]
     if not valid_heads:
         logger.warning(f"No valid heads for n_embed={n_embed}, forcing fallback.")
         return None
         
     num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
-    block_size = trial.suggest_int("block_size", 64, 512, step=16)
-    n_blocks = trial.suggest_int('n_blocks', 1, 6)
-    T = trial.suggest_int('T', 4, 20, log=True)
-    dropout = trial.suggest_float("dropout", 0.05, 0.3)
-    base_lr = trial.suggest_float('base_lr', 1e-5, 1e-3, log=True)
+    block_size = trial.suggest_int("block_size", 160, 192, step=16)
+    n_blocks = trial.suggest_int('n_blocks', 5, 6)
+    T = trial.suggest_int('T', 6, 7)
+    dropout = trial.suggest_float("dropout", 0.17, 0.21)
+    base_lr = trial.suggest_float('base_lr', 1e-5, 1.2e-5, log=True)
     warmup_steps = trial.suggest_int('warmup_steps', 100, 500)
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
-    scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
+    # scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
     
     return GPTConfig(
         vocab_size=vocab_size,
         block_size=block_size,
-        peak_learning_rate=scaled_lr,
+        peak_learning_rate=base_lr,
         warmup_steps=warmup_steps,
         n_embed=n_embed,
         dropout=dropout,
