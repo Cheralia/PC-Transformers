@@ -302,7 +302,7 @@ def main():
 
         model.module.register_all_lateral_weights()
 
-    train_loader, valid_loader, _ = get_loaders(distributed=use_ddp)
+    #train_loader, valid_loader, _ = get_loaders(distributed=use_ddp)
     
     global_step = 0
     train_energies = []
