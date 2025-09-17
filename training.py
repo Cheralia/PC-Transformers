@@ -313,8 +313,8 @@ def main():
         logger.info(f"{sum(p.numel() for p in model.parameters())/1e6:.2f} M parameters")
 
     for epoch in range(config.num_epochs):
-        if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
-            train_loader.sampler.set_epoch(epoch)
+        # if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
+        #     train_loader.sampler.set_epoch(epoch)
 
         if rank == 0:
             logger.info(f"Epoch {epoch + 1}/{config.num_epochs}")
