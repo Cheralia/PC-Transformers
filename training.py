@@ -19,7 +19,56 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.device_utils import setup_device, cleanup_memory
 import json
 import logging
+import tiktoken
+from contextlib import nullcontext
+import requests
+import numpy as np
+best_config = load_best_config()  
+config = GPTConfig(
+        # vocab_size = 50340,
 
+        # block_size = 256,
+        # peak_learning_rate = best_config["peak_learning_rate"],
+        # warmup_steps = 100,
+        # n_embed = 12,
+        # dropout = 0.1,
+        # local_learning_rate = 2e-3,
+        # T = 1,
+        # is_holding_error = True,
+        # num_heads = 3,
+        # n_blocks = 2,
+        # num_epochs = 5, 
+        # update_bias = best_config["update_bias"],
+        # use_lateral = True,
+        # internal_energy_fn_name="pc_e",
+        # output_energy_fn_name="pc_e",
+        # combined_internal_weight=0.7,
+        # combined_output_weight=0.3,
+        # use_flash_attention=True  
+        
+        vocab_size = 50259,
+        block_size =  176,
+        local_learning_rate =  1e-05,
+        peak_learning_rate = 1.1479716638455936e-05,
+        warmup_steps = 166,
+        la =  0.5,
+        n_embed = 64,
+        dropout =  0.1854371025507931,
+        T = 6,
+        is_holding_error =  True,
+        update_bias = True,
+        num_heads = 4,
+        n_blocks = 5,
+        batch_size = 8,
+        num_epochs = 3,
+        use_lateral =  True,
+        internal_energy_fn_name = "pc_e",
+        output_energy_fn_name = "pc_e",
+        eos_token_id =  None,
+        use_flash_attention = False,
+        combined_internal_weight = 0.3,
+        combined_output_weight = 0.7,
+    )
 """
 This script trains the predictive coding transformer model on the provided dataset.
 It tracks and plots the average predictive coding energy per epoch and saves the trained model.
@@ -27,14 +76,58 @@ It tracks and plots the average predictive coding energy per epoch and saves the
 Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
 
 """
+input_file_path = os.path.join(os.path.dirname(__file__), 'input.txt')
+if not os.path.exists(input_file_path):
+    data_url = 'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt'
+    with open(input_file_path, 'w', encoding='utf-8') as f:
+        f.write(requests.get(data_url).text)
 
-def train(model, dataloader, tokenizer, config, global_step, device, logger):
+with open(input_file_path, 'r', encoding='utf-8') as f:
+    data = f.read()
+n = len(data)
+train_data = data[:int(n*0.9)]
+val_data = data[int(n*0.9):]
+
+# encode with tiktoken gpt2 bpe
+enc = tiktoken.get_encoding("gpt2")
+train_ids = enc.encode_ordinary(train_data)
+val_ids = enc.encode_ordinary(val_data)
+print(f"train has {len(train_ids):,} tokens")
+print(f"val has {len(val_ids):,} tokens")
+
+# export to bin files in 'data' directory
+data_dir = os.path.join(os.path.dirname(__file__), 'data')
+os.makedirs(data_dir, exist_ok=True)
+train_ids = np.array(train_ids, dtype=np.uint16)
+val_ids = np.array(val_ids, dtype=np.uint16)
+train_ids.tofile(os.path.join(data_dir, 'train.bin'))
+val_ids.tofile(os.path.join(data_dir, 'val.bin'))
+def get_batch(split):
+    # We recreate np.memmap every batch to avoid a memory leak, as per
+    # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
+    if split == 'train':
+        data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+    else:
+        data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
+    ix = torch.randint(len(data) - config.block_size, (config.batch_size,))
+    x = torch.stack([torch.from_numpy((data[i:i+config.block_size]).astype(np.int64)) for i in ix])
+    y = torch.stack([torch.from_numpy((data[i+1:i+1+config.block_size]).astype(np.int64)) for i in ix])
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device_type = 'cuda' if 'cuda' in device else 'cpu'
+    if device_type == 'cuda':
+        # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
+        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+    else:
+        x, y = x.to(device), y.to(device)
+    return x, y
+
+def train(model, config, global_step, device, logger,num_batches=100):
     model.train()
     total_ce_loss = 0.0
     total_energy = 0.0
     batch_count = 0
-    pad_token_id = tokenizer.pad_token_id
-    vocab_size = len(tokenizer)
+    # pad_token_id = tokenizer.pad_token_id
+    # vocab_size = len(tokenizer)
 
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
@@ -43,12 +136,15 @@ def train(model, dataloader, tokenizer, config, global_step, device, logger):
     beta = getattr(config, 'combined_output_weight', 0.7)
     
 
-    for batch_idx, batch in enumerate(dataloader):
-        input_ids = batch["input_ids"].to(device)
-        target_ids = batch["target_ids"].to(device)
+    # for batch_idx, batch in enumerate(dataloader):
+    #     input_ids = batch["input_ids"].to(device)
+    #     target_ids = batch["target_ids"].to(device)
+    for batch_idx in range(num_batches):
+        xb, yb = get_batch('train')
+        logits,ce_loss = model(xb, yb)
 
-        if target_ids.max() >= vocab_size:
-            target_ids = torch.clamp(target_ids, max=vocab_size - 1)
+        # if target_ids.max() >= vocab_size:
+        #     target_ids = torch.clamp(target_ids, max=vocab_size - 1)
 
         if global_step < config.warmup_steps:
             lr = config.local_learning_rate + global_step / config.warmup_steps * (
@@ -61,16 +157,16 @@ def train(model, dataloader, tokenizer, config, global_step, device, logger):
                 module.set_learning_rate(lr)
                 
         global_step += 1
-        if target_ids.max() >= vocab_size:
-            target_ids = torch.clamp(target_ids, max=vocab_size-1)
+        # if target_ids.max() >= config.vocab_size:
+        #     target_ids = torch.clamp(target_ids, max=vocab_size-1)
             
             
-        logits = model(target_ids, input_ids)
-        ce_loss = F.cross_entropy(
-            logits.view(-1, logits.size(-1)),
-            target_ids.view(-1),
-            ignore_index=pad_token_id
-        )
+        # logits = model(target_ids, input_ids)
+        # ce_loss = F.cross_entropy(
+        #     logits.view(-1, logits.size(-1)),
+        #     target_ids.view(-1),
+        #     ignore_index=-
+        # )
         total_ce_loss += ce_loss.item()
 
         internal_energies = []
@@ -109,9 +205,9 @@ def train(model, dataloader, tokenizer, config, global_step, device, logger):
 
         if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
             if logger:
-                logger.info(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
+                logger.info(f"  Batch {batch_idx + 1}/{num_batches} | Batch Energy: {batch_energy:.4f} | Batch Loss: {ce_loss.item():.4f}  | Perplexity: {perplexity:.4f}")
             else:
-                print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
+                print(f"  Batch {batch_idx + 1}/{num_batches} | Batch Energy: {batch_energy:.4f} | Batch Loss: {ce_loss.item():.4f} | Perplexity: {perplexity:.4f}")
 
         reset_pc_modules(model)
         cleanup_memory()
@@ -155,30 +251,31 @@ def main():
 
     logger = logging.getLogger(__name__)
    
-    config = GPTConfig(
-        vocab_size = vocab_size,
+    # config = GPTConfig(
+    #     vocab_size = vocab_size,
 
-        block_size = best_config["block_size"],
-        peak_learning_rate = best_config["peak_learning_rate"],
-        warmup_steps = best_config["warmup_steps"],
-        n_embed = best_config["n_embed"],
-        dropout = best_config["dropout"],
-        local_learning_rate = 1e-5,
-        T = best_config["T"],
-        is_holding_error = True,
-        num_heads = best_config["num_heads"],
-        n_blocks = best_config["n_blocks"],
-        num_epochs = 20, 
-        update_bias = best_config["update_bias"],
-        use_lateral = True,
-        internal_energy_fn_name="pc_e",
-        output_energy_fn_name="pc_e",
-        eos_token_id=tokenizer.eos_token_id,
-        combined_internal_weight=0.7,
-        combined_output_weight=0.3,
-        use_flash_attention=True  
-    )
-    
+    #     block_size = best_config["block_size"],
+    #     peak_learning_rate = best_config["peak_learning_rate"],
+    #     warmup_steps = best_config["warmup_steps"],
+    #     n_embed = best_config["n_embed"],
+    #     dropout = best_config["dropout"],
+    #     local_learning_rate = 1e-5,
+    #     T = best_config["T"],
+    #     is_holding_error = True,
+    #     num_heads = best_config["num_heads"],
+    #     n_blocks = best_config["n_blocks"],
+    #     num_epochs = 20, 
+    #     update_bias = best_config["update_bias"],
+    #     use_lateral = True,
+    #     internal_energy_fn_name="pc_e",
+    #     output_energy_fn_name="pc_e",
+    #     eos_token_id=tokenizer.eos_token_id,
+    #     combined_internal_weight=0.7,
+    #     combined_output_weight=0.3,
+    #     use_flash_attention=True  
+    # )
+    #cpu
+   
     # Create a separate logger for hyperparameters
     param_logger = logging.getLogger('param_logger')
     param_logger.setLevel(logging.INFO)
@@ -221,24 +318,22 @@ def main():
 
         if rank == 0:
             logger.info(f"Epoch {epoch + 1}/{config.num_epochs}")
-
+        num_batches=100
         model.train()
         train_energy, train_perplexity, global_step = train(
-            model, train_loader, tokenizer, config, global_step, device, logger
-        )
+            model, config, global_step, device, logger,num_batches)
         train_energies.append(train_energy)
 
-        model.eval()
-        val_energy, val_perplexity = evaluate(
-            model, valid_loader, tokenizer, max_batches=None, device=device
-        )
+        # model.eval()
+        # val_energy, val_perplexity = evaluate(
+        #     model, valid_loader, tokenizer, max_batches=None, device=device
+        # )
         
-        val_energies.append(val_energy)
+        # val_energies.append(val_energy)
 
         if rank == 0:
             logger.info(f"Epoch {epoch + 1}/{config.num_epochs} | "
-                  f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
-                  f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
+                  f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f}")
 
             if (epoch + 1) % 5 == 0 or epoch == config.num_epochs - 1:
                 os.makedirs("checkpoints", exist_ok=True)
@@ -248,9 +343,9 @@ def main():
                     'epoch': epoch,
                     'model_state_dict': model_to_save.state_dict(),
                     'train_energy': train_energy,
-                    'val_energy': val_energy,
+                    # 'val_energy': val_energy,
                     'train_perplexity': train_perplexity,
-                    'val_perplexity': val_perplexity
+                    # 'val_perplexity': val_perplexity
                 }
                 checkpoint_path = f'checkpoints/model_epoch_{epoch+1}.pt'
                 torch.save(checkpoint, checkpoint_path)
@@ -265,9 +360,9 @@ def main():
             'epoch': config.num_epochs,
             'model_state_dict': model_to_save.state_dict(),
             'train_energy': train_energy,
-            'val_energy': val_energy,
+            # 'val_energy': val_energy,
             'train_perplexity': train_perplexity,
-            'val_perplexity': val_perplexity
+            # 'val_perplexity': val_perplexity
         }
         torch.save(final_checkpoint, 'checkpoints/final_model.pt')
         total_time = time.time() - start_time

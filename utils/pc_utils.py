@@ -8,24 +8,24 @@ from contextlib import nullcontext
 from predictive_coding.config import GPTConfig
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
 
-def compute_DVL(attn_v, requires_update):
-    B, H, T, D = attn_v.shape
-    device = attn_v.device
-    x = attn_v.transpose(0, 1).flatten(2, 3)  # (H, B, T*D)
-    x = x.transpose(0, 1)  
-    x = F.normalize(x, p=2, dim=-1)
-    s_m = torch.bmm(x, x.transpose(1, 2))  
-    s_m = s_m.mean(dim=0)  
-    identity = torch.eye(H, device=attn_v.device)  
-    corr = s_m - identity  
-    dvl = (corr ** 2).mean()  
-    dvl_grad = torch.zeros_like(attn_v, device=device)
-    try:
-        if requires_update:
-            dvl_grad = torch.autograd.grad(dvl, attn_v, retain_graph=True)[0]
-    except Exception as e:
-        print(f"Error computing diversity gradient: {e}")
-    return dvl_grad
+# def compute_DVL(attn_v, requires_update):
+#     B, H, T, D = attn_v.shape
+#     device = attn_v.device
+#     x = attn_v.transpose(0, 1).flatten(2, 3)  # (H, B, T*D)
+#     x = x.transpose(0, 1)  
+#     x = F.normalize(x, p=2, dim=-1)
+#     s_m = torch.bmm(x, x.transpose(1, 2))  
+#     s_m = s_m.mean(dim=0)  
+#     identity = torch.eye(H, device=attn_v.device)  
+#     corr = s_m - identity  
+#     dvl = (corr ** 2).mean()  
+#     dvl_grad = torch.zeros_like(attn_v, device=device)
+#     try:
+#         if requires_update:
+#             dvl_grad = torch.autograd.grad(dvl, attn_v, retain_graph=True)[0]
+#     except Exception as e:
+#         print(f"Error computing diversity gradient: {e}")
+#     return dvl_grad
 
 def get_head_similarity(mu_heads):
     B, H, T, D = mu_heads.shape
@@ -177,7 +177,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         else:
           x= x + local_lr * error 
     
-        x = torch.clamp(x, clamp_value, clamp_value)
+        # x = torch.clamp(x, clamp_value, clamp_value)
     
     # PC Update W_layer
     if requires_update:
@@ -199,6 +199,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         assert proj_layers is not None, "proj_layers dict is required for attention"
         device = x.device
         x=layer_norm(x)
+        x.requires_grad_(True) 
         q_proj = proj_layers.get("q_proj", None)
         k_proj = proj_layers.get("k_proj", None)
         v_proj = proj_layers.get("v_proj", None)
@@ -215,6 +216,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             Q= q_proj(x)
             K= k_proj(x)
             V= v_proj(x)
+            V.requires_grad_(True)
             
             Q = Q.view(batch_size, num_heads, seq_len, head_dim)
             K = K.view(batch_size, num_heads, seq_len, head_dim)
@@ -230,10 +232,10 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             else:
                 mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
 
-            dvl_grad = compute_DVL(mu_heads, requires_update)
-            if dvl_grad is not None:
-               dvl_grad = dvl_grad.to(device)
-            dvl_norm = dvl_grad.norm().item() if dvl_grad is not None else 0.0
+            # dvl_grad = compute_DVL(mu_heads, requires_update)
+            # if dvl_grad is not None:
+            #    dvl_grad = dvl_grad.to(device)
+            # dvl_norm = dvl_grad.norm().item() if dvl_grad is not None else 0.0
             similarity = get_head_similarity(mu_heads)
             mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
@@ -243,11 +245,11 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             else:
                 error = bu_err  
           
-            if dvl_grad is not None:
-                B, H, T, D = dvl_grad.shape               # matches compute_DVL output
-                dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, H*D)  # [B, T, embed_dim]
-                dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
-                error = error + la * dvl_projected
+            # if dvl_grad is not None:
+            #     B, H, T, D = dvl_grad.shape               # matches compute_DVL output
+            #     dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, H*D)  # [B, T, embed_dim]
+            #     dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
+            #     error = error + la * dvl_projected
                 
         if layer_instance is not None:
             setattr(layer_instance, '_head_similarity', similarity)

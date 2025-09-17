@@ -31,9 +31,9 @@ class GPT2TokenizerWrapper:
         self.tokenizer_path = os.path.join(Config.TOKENIZER_DIR, f"gpt2_tokenizer_{dataset_name}.json")
 
     def tokenize_and_save(self, subset_name):
-        subset_path = os.path.join(Config.DATA_DIR, self.dataset_name, f"{subset_name}.txt")
+        subset_path = os.path.join(Config.DATA_DIR, self.dataset_name, f"{subset_name}.csv")
         if not os.path.exists(subset_path):
-           raise FileNotFoundError(f"{subset_name}.txt not found in {os.path.join(Config.DATA_DIR, self.dataset_name)}")
+           raise FileNotFoundError(f"{subset_name}.csv not found in {os.path.join(Config.DATA_DIR, self.dataset_name)}")
 
         MAX_SEQ_LENGTH = Config.MAX_LENGTH
         print(f"Reading file: {subset_path}")  # Debug statement
