@@ -25,7 +25,7 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     return GPTConfig(
         vocab_size=vocab_size,
         block_size=block_size,
-        peak_learning_rate=base_lr,
+        peak_learning_rate=min(base_lr, 1e-5),
         warmup_steps=warmup_steps,
         n_embed=n_embed,
         dropout=dropout,
