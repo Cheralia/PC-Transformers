@@ -89,10 +89,10 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
         mu_norm=layer_norm(mu)
     
         error = target - mu_norm
-        if not requires_update:
-            if t == T - 1:
-                finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
-            return mu, mu_word, mu_pos, error
+        # if not requires_update:
+        #     if t == T - 1:
+        #         finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
+        return mu, mu_word, mu_pos, error
 
         
     if requires_update: 
@@ -106,8 +106,8 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
             word_layer.weight.data.index_add_(0, flat_input_ids, delta)
             pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
             
-    if t == T - 1:
-           finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
+    # if t == T - 1:
+    #        finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
   
     return mu, mu_word, mu_pos, error
     
@@ -190,8 +190,8 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
             layer.bias.data.add_(delta_b)
 
     x = torch.clamp(x, -clamp_value, clamp_value)
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+    # if t == T - 1:
+    #     finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
     return x, mu, bu_err
 
@@ -281,8 +281,8 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
                     delta_b = delta_b.view(-1)
                     proj.bias.data.add_(delta_b)
  
-        if t == T - 1:
-            finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+        # if t == T - 1:
+        #     finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
      
         return x, mu, bu_err
     
