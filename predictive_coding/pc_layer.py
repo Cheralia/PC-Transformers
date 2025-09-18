@@ -178,6 +178,7 @@ class PCLayer(nn.Module):
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
         device: torch.device = None,
+        initial_x: Optional[torch.Tensor] = None,
     ):
         """
         Initialize the layer's state variables and store them in x_cache.
@@ -214,8 +215,12 @@ class PCLayer(nn.Module):
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
             H_out = proj_layers["v_proj"].weight.shape[0] 
-            self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
-            
+            if initial_x is not None:
+               assert initial_x.shape == (batch_size, seq_len, H_out), f"Shape mismatch for layer {layer_type}"
+               self._x_cache["attn"] = initial_x
+            else:
+               self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
+
             if self.use_lateral:
                 self.register_lateral(layer_type, H_in)
                 
@@ -224,7 +229,11 @@ class PCLayer(nn.Module):
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
-            self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
+            if initial_x is not None:
+               assert initial_x.shape == (batch_size, seq_len, input_dim), f"Shape mismatch for layer {layer_type}"
+               self._x_cache[layer_type] = initial_x
+            else:
+               self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
             H_in = layer.weight.shape[1]
 
             if self.use_lateral:
