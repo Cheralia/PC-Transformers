@@ -5,7 +5,7 @@ from .transformer_block import TransformerBlock
 from utils.pc_utils import ids_to_one_hot
 from .output import OutputLayer
 from utils.device_utils import create_streams_or_futures, execute_parallel, synchronize_execution
-
+from utils.pc_replay_buffer import PCReplayBuffer
 class PCTransformer(nn.Module):
     """
     Top-down Predictive Coding Transformer model.
@@ -27,7 +27,7 @@ class PCTransformer(nn.Module):
         self.embedding = Embedding_Layer(config)
         self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_blocks)])
         self.output = OutputLayer(config)
-
+        self.replay_buffer = PCReplayBuffer()
     def register_all_lateral_weights(self):
         """
         Register lateral weights for all predictive coding layers in the model.
@@ -77,8 +77,9 @@ class PCTransformer(nn.Module):
         
         target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
-
         # Initialize all predictive coding layers
+        embed_initial= self.replay_buffer.get_initial_state("embed")
+        # print(f"[DEBUG] _initial is None: {embed_initial is None}")
         self.embedding.pc_layer.init_x(
             batch_size=B,
             seq_len=S,
@@ -86,44 +87,55 @@ class PCTransformer(nn.Module):
             layer_type="embed",
             input_ids=input_ids,
             position_ids=position_ids,
-            device=device
+            device=device,
+            initial_x=embed_initial
         )
-
+        
         for block in self.blocks:
+            attn_initial = self.replay_buffer.get_initial_state("attn")
+            attn_out_initial = self.replay_buffer.get_initial_state("linear_attn")
+            mlp1_initial = self.replay_buffer.get_initial_state("fc1")
+            mlp2_initial = self.replay_buffer.get_initial_state("fc2")
+            output_initial = self.replay_buffer.get_initial_state("output")
             block.attn.pc_qkv.init_x(
                 batch_size=B,
                 seq_len=S,
                 proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
                 layer_type="attn",
-                device=device
+                device=device,
+                initial_x=attn_initial
             )
             block.attn.pc_output.init_x(
                 batch_size=B,
                 seq_len=S,
                 layer=block.attn.output,
                 layer_type="linear_attn",
-                device=device
+                device=device,
+                initial_x=attn_out_initial
             )
             block.mlp.pc_layer1.init_x(
                 batch_size=B,
                 seq_len=S,
                 layer=block.mlp.fc1,
                 layer_type="fc1",
-                device=device
+                device=device,
+                initial_x=mlp1_initial
             )
             block.mlp.pc_layer2.init_x(
                 batch_size=B,
                 seq_len=S,
                 layer=block.mlp.fc2,
                 layer_type="fc2",
-                device=device
+                device=device,
+                initial_x=mlp2_initial
             )
         self.output.pc_layer.init_x(
             batch_size=B,
             seq_len=S,
             layer=self.output.output,
             layer_type="linear_output",
-            device=device
+            device=device,
+            initial_x=output_initial
         )
 
         # Initialize streams or futures for parallel execution
@@ -142,9 +154,9 @@ class PCTransformer(nn.Module):
                 t=t,
                 T=self.config.T,
                 requires_update=self.training,
-                td_err= td_mlp2  #it's preferable to make the td error None for the output layer 
+                td_err= None  #it's preferable to make the td error None for the output layer 
             )
-
+            self.replay_buffer.record_step(self.output.pc_layer, "output", t, self.config.T)
             # Iterate through blocks in reverse order for parallel execution
             for idx in range(len(self.blocks) - 1, -1, -1):
                 block = self.blocks[idx]
@@ -173,6 +185,7 @@ class PCTransformer(nn.Module):
                     td_err= td_mlp1,
                     layer_norm=layer_norm2
                 )
+
                 td_attn_op = block.attn.pc_output.get_td_err("linear_attn") if t > 0 else None
 
                 # Execute MLP layer 1
@@ -189,7 +202,6 @@ class PCTransformer(nn.Module):
                     td_err= td_attn_op,
                     layer_norm=block.ln1
                 )
-                
                 if idx == 0:
                    td_embed = self.embedding.pc_layer.get_td_err("embed") if t > 0 else None
                 else:
@@ -212,7 +224,6 @@ class PCTransformer(nn.Module):
                     td_err= td_attn_qkv,
                     layer_norm=block.ln1
                 )
-
                 # Execute attention QKV
                 execute_parallel(
                     use_cuda,
@@ -229,7 +240,11 @@ class PCTransformer(nn.Module):
                     layer_norm=block.ln2
             
                 )
-
+                if idx== len(self.blocks) -1:
+                  self.replay_buffer.record_step(block.attn.pc_qkv, "attn", t, self.config.T)   
+                  self.replay_buffer.record_step(block.attn.pc_output, "linear_attn", t, self.config.T)
+                  self.replay_buffer.record_step(block.mlp.pc_layer1, "fc1", t, self.config.T) 
+                  self.replay_buffer.record_step(block.mlp.pc_layer2, "fc2", t, self.config.T)
             # Execute embedding layer
             execute_parallel(
                 use_cuda,
@@ -245,7 +260,7 @@ class PCTransformer(nn.Module):
                 requires_update=self.training,
                 layer_norm= block.ln2
             )
-
+            self.replay_buffer.record_step(self.embedding.pc_layer, "embed", t, self.config.T)
             # Synchronize all parallel tasks
             synchronize_execution(use_cuda, streams_or_futures)
         logits = self.output.pc_layer.get_mu("linear_output")
