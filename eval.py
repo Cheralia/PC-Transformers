@@ -3,6 +3,7 @@ import math
 import torch
 import math
 import os
+import requests
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from Data_preprocessing.dataloader import get_loaders
@@ -14,6 +15,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils.device_utils import setup_device, cleanup_memory
 import argparse
+import numpy as np
+import tiktoken
+from Data_preprocessing.tokenizer.tiktoken_tokenizer import *
+
 """
 This script evaluates the performance of the predictive coding transformer model.
 
@@ -23,13 +28,13 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> eval.py
 
 local_rank, device, use_ddp = setup_device()
 
-def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
+def evaluate(model, device = None,num_batches=100):
     model.eval()
     total_energy = 0.0
     batch_count = 0
     total_ce_loss = 0.0
-    pad_token_id = tokenizer.pad_token_id
-    vocab_size = len(tokenizer)
+    # pad_token_id = tokenizer.pad_token_id
+    # vocab_size = len(tokenizer)
     
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
@@ -37,34 +42,30 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
     alpha = getattr(base_model.config, 'combined_internal_weight', 0.3)
     beta = getattr(base_model.config, 'combined_output_weight', 0.7)
     
-    if local_rank == 0:
-        if max_batches is None:
-            print(f"Evaluating on the full test set...")
-        else:
-            print(f"Evaluating on up to {max_batches} batches...")
+    # if local_rank == 0:
+    #     if max_batches is None:
+    #         print(f"Evaluating on the full test set...")
+    #     else:
+    #         print(f"Evaluating on up to {max_batches} batches...")
    
-    for batch_idx, batch in enumerate(dataloader):
-        if max_batches is not None and batch_idx >= max_batches:
-            break
+    for batch_idx in range(num_batches):
+        # if max_batches is not None and batch_idx >= max_batches:
+        #     break
+        input_ids, targets = get_batch('val')
+        # input_ids = batch["input_ids"].to(device)
+        # targets = batch["target_ids"].to(device)
 
-        input_ids = batch["input_ids"].to(device)
-        targets = batch["target_ids"].to(device)
-
-        if local_rank == 0:
-            if (targets == pad_token_id).sum() == 0:
-                print(f"No pad tokens detected in batch {batch_idx + 1}, check padding behavior.")
+        # if local_rank == 0:
+        #     if (targets == pad_token_id).sum() == 0:
+        #         print(f"No pad tokens detected in batch {batch_idx + 1}, check padding behavior.")
 
         # Clip targets to valid range before using them for loss calculation
-        if targets.max() >= vocab_size:
-            targets = torch.clamp(targets, max=vocab_size-1)
+        # if targets.max() >= vocab_size:
+        #     targets = torch.clamp(targets, max=vocab_size-1)
        
 
-        logits = model(targets, input_ids)
-        ce_loss = F.cross_entropy(
-            logits.view(-1, logits.size(-1)),
-            targets.view(-1),
-            ignore_index=pad_token_id,
-        )
+        logits,ce_loss = model(targets, input_ids)
+        
         total_ce_loss += ce_loss.item()
 
         internal_energies = []
@@ -96,7 +97,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         batch_count += 1
 
         if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f}")
+            print(f"  Batch {batch_idx + 1}/{num_batches} | Batch Energy: {batch_energy:.4f}")
         
         reset_pc_modules(model)
         cleanup_memory()
@@ -124,41 +125,39 @@ def main():
         dist.init_process_group(backend="nccl")
 
     print(f"[Rank {local_rank}] Using device: {device}")
-
-    tokenizer = load_tokenizer()
-    vocab_size = len(tokenizer)
-    
     best_config = load_best_config()
-    
     config = GPTConfig(
-        vocab_size = vocab_size,
-        block_size = best_config["block_size"],
-        n_embed = best_config["n_embed"],
-        dropout = best_config["dropout"],
-        local_learning_rate = best_config["peak_learning_rate"],
-        T = best_config["T"],
+        vocab_size = 50259,
+        block_size = 256,
+        peak_learning_rate = best_config["peak_learning_rate"],
+        warmup_steps = 100,
+        n_embed = 12,
+        dropout = 0.1,
+        local_learning_rate = 1e-4,
+        T = 1,
         is_holding_error = True,
-        num_heads = best_config["num_heads"],
-        n_blocks = best_config["n_blocks"],
-        num_epochs = 1,
+        num_heads = 1,
+        n_blocks = 1,
+        num_epochs = 2, 
+        update_bias = best_config["update_bias"],
+        use_lateral = True,
         internal_energy_fn_name="pc_e",
         output_energy_fn_name="pc_e",
-        eos_token_id = tokenizer.eos_token_id,
-        combined_internal_weight=0.3,
-        combined_output_weight=0.7,
-        update_bias = best_config["update_bias"]        
-    )
+        combined_internal_weight=0.7,
+        combined_output_weight=0.3,
+        use_flash_attention=True  
+)  
   
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
     model = model.to(device)
     if use_ddp:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
-    _, _, test_loader = get_loaders(distributed = use_ddp)
+    # _, _, test_loader = get_loaders(distributed = use_ddp)
 
     # Max batches can be set to limit evaluation, or None for full dataset
     start_time = time.time()
-    evaluate(model, test_loader, tokenizer, max_batches= None, device=device)
+    evaluate(model, device=device,num_batches=100)
     elapsed = time.time() - start_time
     if not dist.is_initialized() or dist.get_rank() == 0:
         print(f"Evaluation completed in {elapsed:.2f} seconds")  
