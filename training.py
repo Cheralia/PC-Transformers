@@ -23,52 +23,9 @@ import tiktoken
 from contextlib import nullcontext
 import requests
 import numpy as np
-best_config = load_best_config()  
-config = GPTConfig(
-        # vocab_size = 50340,
+from Data_preprocessing.tokenizer.tiktoken_tokenizer import *
 
-        # block_size = 256,
-        # peak_learning_rate = best_config["peak_learning_rate"],
-        # warmup_steps = 100,
-        # n_embed = 12,
-        # dropout = 0.1,
-        # local_learning_rate = 2e-3,
-        # T = 1,
-        # is_holding_error = True,
-        # num_heads = 3,
-        # n_blocks = 2,
-        # num_epochs = 5, 
-        # update_bias = best_config["update_bias"],
-        # use_lateral = True,
-        # internal_energy_fn_name="pc_e",
-        # output_energy_fn_name="pc_e",
-        # combined_internal_weight=0.7,
-        # combined_output_weight=0.3,
-        # use_flash_attention=True  
-        
-        vocab_size = 50259,
-        block_size =  176,
-        local_learning_rate =  1e-05,
-        peak_learning_rate = 1.1479716638455936e-05,
-        warmup_steps = 166,
-        la =  0.5,
-        n_embed = 64,
-        dropout =  0.1854371025507931,
-        T = 6,
-        is_holding_error =  True,
-        update_bias = True,
-        num_heads = 4,
-        n_blocks = 5,
-        batch_size = 8,
-        num_epochs = 3,
-        use_lateral =  True,
-        internal_energy_fn_name = "pc_e",
-        output_energy_fn_name = "pc_e",
-        eos_token_id =  None,
-        use_flash_attention = False,
-        combined_internal_weight = 0.3,
-        combined_output_weight = 0.7,
-    )
+  
 """
 This script trains the predictive coding transformer model on the provided dataset.
 It tracks and plots the average predictive coding energy per epoch and saves the trained model.
@@ -76,50 +33,6 @@ It tracks and plots the average predictive coding energy per epoch and saves the
 Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
 
 """
-input_file_path = os.path.join(os.path.dirname(__file__), 'input.txt')
-if not os.path.exists(input_file_path):
-    data_url = 'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt'
-    with open(input_file_path, 'w', encoding='utf-8') as f:
-        f.write(requests.get(data_url).text)
-
-with open(input_file_path, 'r', encoding='utf-8') as f:
-    data = f.read()
-n = len(data)
-train_data = data[:int(n*0.9)]
-val_data = data[int(n*0.9):]
-
-# encode with tiktoken gpt2 bpe
-enc = tiktoken.get_encoding("gpt2")
-train_ids = enc.encode_ordinary(train_data)
-val_ids = enc.encode_ordinary(val_data)
-print(f"train has {len(train_ids):,} tokens")
-print(f"val has {len(val_ids):,} tokens")
-
-# export to bin files in 'data' directory
-data_dir = os.path.join(os.path.dirname(__file__), 'data')
-os.makedirs(data_dir, exist_ok=True)
-train_ids = np.array(train_ids, dtype=np.uint16)
-val_ids = np.array(val_ids, dtype=np.uint16)
-train_ids.tofile(os.path.join(data_dir, 'train.bin'))
-val_ids.tofile(os.path.join(data_dir, 'val.bin'))
-def get_batch(split):
-    # We recreate np.memmap every batch to avoid a memory leak, as per
-    # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
-    if split == 'train':
-        data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
-    else:
-        data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
-    ix = torch.randint(len(data) - config.block_size, (config.batch_size,))
-    x = torch.stack([torch.from_numpy((data[i:i+config.block_size]).astype(np.int64)) for i in ix])
-    y = torch.stack([torch.from_numpy((data[i+1:i+1+config.block_size]).astype(np.int64)) for i in ix])
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    device_type = 'cuda' if 'cuda' in device else 'cpu'
-    if device_type == 'cuda':
-        # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-    else:
-        x, y = x.to(device), y.to(device)
-    return x, y
 
 def train(model, config, global_step, device, logger,num_batches=100):
     model.train()
@@ -135,13 +48,9 @@ def train(model, config, global_step, device, logger,num_batches=100):
     alpha = getattr(config, 'combined_internal_weight', 0.3)
     beta = getattr(config, 'combined_output_weight', 0.7)
     
-
-    # for batch_idx, batch in enumerate(dataloader):
-    #     input_ids = batch["input_ids"].to(device)
-    #     target_ids = batch["target_ids"].to(device)
     for batch_idx in range(num_batches):
-        xb, yb = get_batch('train')
-        logits,ce_loss = model(xb, yb)
+        input_ids, targets = get_batch('train')
+        logits,ce_loss = model(input_ids, targets)
 
         # if target_ids.max() >= vocab_size:
         #     target_ids = torch.clamp(target_ids, max=vocab_size - 1)
@@ -218,6 +127,7 @@ def train(model, config, global_step, device, logger,num_batches=100):
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
     return avg_energy, avg_perplexity, global_step
 
+# vocab_size = enc.n_vocab
 
 def main():
     local_rank, device, use_ddp = setup_device()
@@ -251,30 +161,28 @@ def main():
 
     logger = logging.getLogger(__name__)
    
-    # config = GPTConfig(
-    #     vocab_size = vocab_size,
-
-    #     block_size = best_config["block_size"],
-    #     peak_learning_rate = best_config["peak_learning_rate"],
-    #     warmup_steps = best_config["warmup_steps"],
-    #     n_embed = best_config["n_embed"],
-    #     dropout = best_config["dropout"],
-    #     local_learning_rate = 1e-5,
-    #     T = best_config["T"],
-    #     is_holding_error = True,
-    #     num_heads = best_config["num_heads"],
-    #     n_blocks = best_config["n_blocks"],
-    #     num_epochs = 20, 
-    #     update_bias = best_config["update_bias"],
-    #     use_lateral = True,
-    #     internal_energy_fn_name="pc_e",
-    #     output_energy_fn_name="pc_e",
-    #     eos_token_id=tokenizer.eos_token_id,
-    #     combined_internal_weight=0.7,
-    #     combined_output_weight=0.3,
-    #     use_flash_attention=True  
-    # )
-    #cpu
+    best_config = load_best_config()  
+    config = GPTConfig(
+            vocab_size = 50259,
+            block_size = 256,
+            peak_learning_rate = best_config["peak_learning_rate"],
+            warmup_steps = 100,
+            n_embed = 12,
+            dropout = 0.1,
+            local_learning_rate = 1e-4,
+            T = 1,
+            is_holding_error = True,
+            num_heads = 2,
+            n_blocks = 2,
+            num_epochs = 1, 
+            update_bias = best_config["update_bias"],
+            use_lateral = True,
+            internal_energy_fn_name="pc_e",
+            output_energy_fn_name="pc_e",
+            combined_internal_weight=0.7,
+            combined_output_weight=0.3,
+            use_flash_attention=True  
+    )  
    
     # Create a separate logger for hyperparameters
     param_logger = logging.getLogger('param_logger')
@@ -303,6 +211,7 @@ def main():
         model.module.register_all_lateral_weights()
 
     #train_loader, valid_loader, _ = get_loaders(distributed=use_ddp)
+    
     
     global_step = 0
     train_energies = []
