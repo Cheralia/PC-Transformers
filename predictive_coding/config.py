@@ -32,10 +32,10 @@ class GPTConfig:
         use_flash_attention (bool): Whether to use FlashAttention.
     """
     vocab_size: int
-    block_size: int
     local_learning_rate: float
     peak_learning_rate: Optional[float] = None
     warmup_steps: Optional[int] = None
+    block_size: int = 256
     la: float=0.5
     n_embed: int =208
     dropout: float = 0.1
