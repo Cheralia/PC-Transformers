@@ -88,12 +88,11 @@ def main():
         # if decoded_preds and decoded_targets and local_rank == 0:
         #     compute_text_metrics(decoded_preds, decoded_targets)
         vocab_size = enc.n_vocab
-        with torch.no_grad():
-            with ctx:
-                for k in range(num_samples):
-                    y = model.generate(x, max_new_tokens=300, temperature=0.8, top_k=top_k)
-                    print(decode(y[0].tolist()))
-                    print('---------------')
+        with ctx:
+            for k in range(num_samples):
+                y = model.generate(x, max_new_tokens=300, temperature=0.8, top_k=top_k)
+                print(decode(y[0].tolist()))
+                print('---------------')
     
     if use_ddp and dist.is_initialized():
         dist.barrier()
