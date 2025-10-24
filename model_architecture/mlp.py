@@ -1,7 +1,6 @@
 import torch.nn as nn
 from predictive_coding.pc_layer import PCLayer
 
-
 class MLP(nn.Module):
     """
     Multi-Layer Perceptron (MLP) block used within the transformer architecture.
@@ -9,16 +8,10 @@ class MLP(nn.Module):
     """
 
     def __init__(self, config):
-        """
-        Initialize the MLP block.
-
-        Args:
-            config: Configuration object with n_embed, T, lr, etc.
-        """
         super().__init__()
         self.fc1 = nn.Linear(config.n_embed, 4 * config.n_embed)
         self.fc2 = nn.Linear(4 * config.n_embed, config.n_embed)
-        # self.dropout = nn.Dropout(config.dropout)
+        self.dropout = nn.Dropout(config.dropout)
 
         self.pc_layer2 = PCLayer(
             T=config.T,
