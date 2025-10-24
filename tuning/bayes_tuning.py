@@ -5,7 +5,7 @@ import os
 import time
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from Data_preprocessing.dataloader import get_loaders
+from data_preparation.dataloader import get_loaders
 from tuning.trial_objective import objective
 from tuning.tuning_logs import initialize_logs, write_final_results
 import torch.distributed as dist

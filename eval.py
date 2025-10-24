@@ -5,7 +5,7 @@ import math
 import os
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
-from Data_preprocessing.dataloader import get_loaders
+from data_preparation.dataloader import get_loaders
 import torch.nn.functional as F
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 from utils.config_utils import load_best_config
