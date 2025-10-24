@@ -3,13 +3,6 @@ import torch.nn as nn
 from typing import Optional
 from utils.pc_utils import x_init, step_embed, step_linear, step_attn, finalize_step
 
-"""
-predictive_coding.pc_layer
-
-This module implements the PCLayer class, which provides predictive coding inference and local learning for neural network layers.
-It supports embedding, attention, and linear layers, and manages iterative inference, error computation, and lateral connections.
-"""
-
 class PCLayer(nn.Module):
     """
     Predictive Coding Layer for neural network modules.
@@ -19,10 +12,10 @@ class PCLayer(nn.Module):
     """
     def __init__(
         self,
-        T: int = 1,
-        lr: float = 1e-3,
-        update_bias: bool = True,
-        energy_fn_name: str = "scaled_mse",
+        T: int,
+        lr: float,
+        update_bias: bool,
+        energy_fn_name: str,
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
         la: Optional[float] = None,
@@ -35,6 +28,9 @@ class PCLayer(nn.Module):
             lr (float): Learning rate for local/lateral updates.
             update_bias (bool): Whether to update bias terms during learning.
             energy_fn_name (str): Name of the energy function to use for error computation.
+            num_heads (Optional[int]): Number of attention heads (only for attention layers).
+            n_embed (Optional[int]): Embedding dimension (only for attention layers).
+            la (Optional[float]): Lateral attention weight (only for attention layers).
         """
         super().__init__()
         self.T = T
@@ -73,16 +69,16 @@ class PCLayer(nn.Module):
     def forward(
         self,
         target_activity: torch.Tensor,
+        layer_type: str,
+        t: int,
+        T: int,
+        requires_update: bool,
         td_err:  Optional[torch.Tensor] = None,
         layer: Optional[nn.Module] = None,
         layer_norm: Optional[nn.Module] = None,
         proj_layers: Optional[dict] = None,
-        layer_type: str = "fc1",
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
-        t=0,
-        T=1,
-        requires_update: bool = True,
         flash: bool = False,
     ):
         """
@@ -91,6 +87,7 @@ class PCLayer(nn.Module):
         Args:
             target_activity (torch.Tensor): Target activity tensor for the layer.
             layer (nn.Module, optional): The layer module (for linear layers).
+            layer_norm (nn.Module, optional): Layer normalization module.
             proj_layers (dict, optional): Dictionary of projection layers (for attention).
             layer_type (str): Type of layer ('embed', 'attn', 'fc1', 'linear', etc.).
             input_ids (torch.Tensor, optional): Input token IDs (for embedding layers).
@@ -99,16 +96,14 @@ class PCLayer(nn.Module):
             T (int): Total number of inference steps.
             requires_update (bool): Whether to update weights.
             flash (bool): Whether to use flash attention (if available).
-
+            td_err (torch.Tensor, optional): Top-down error from above layer.
         Returns:
             torch.Tensor or tuple: Updated activity tensor(s) for the layer.
         """
-        B, S, _ = target_activity.shape    
         x = None
         self._energy = 0.0
         self._errors = []
         
-
         if layer_type == "embed":
             if "embed" not in self._x_cache:
                 raise ValueError("Embedding state not initialized. Call init_x first.")
@@ -167,12 +162,12 @@ class PCLayer(nn.Module):
         self,
         batch_size: int,
         seq_len: int,
+        layer_type: str,
+        device: torch.device,
         layer: Optional[nn.Module] = None,
         proj_layers: Optional[dict] = None,
-        layer_type: str = "linear",
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
-        device: torch.device = None,
     ):
         """
         Initialize the layer's state variables and store them in x_cache.
@@ -186,9 +181,6 @@ class PCLayer(nn.Module):
             input_ids (torch.Tensor, optional): Input token IDs (for embedding layers).
             position_ids (torch.Tensor, optional): Position IDs (for embedding layers).
         """
-        if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
             
@@ -228,77 +220,39 @@ class PCLayer(nn.Module):
                 
 
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
-        """
-        Get the cached activity tensor for a given layer type.
-
-        Args:
-            layer_type (str): The type of layer.
-        Returns:
-            torch.Tensor or None: Cached activity tensor, or None if not present.
-        """
+        """Get the cached activity tensor for a given layer type."""
         return self._x_cache.get(layer_type, None)
+    
     def get_mu(self, layer_type: str) -> Optional[torch.Tensor]:
-        """" Get the cached mu(prediction of each layer) tensor for a given layer type.
-
-        Args:
-            layer_type (str): The type of layer.
-        Returns:
-            torch.Tensor or None: Cached prediction tensor, or None if not present.
-        """
+        """Get the cached mu (prediction) tensor for a given layer type."""
         return self._mu_cache.get(layer_type, None)
+    
     def get_td_err(self, layer_type: str) -> Optional[torch.Tensor]:
-        """" Get the cached mu(prediction of each layer) tensor for a given layer type.
-
-        Args:
-            layer_type (str): The type of layer.
-        Returns:
-            torch.Tensor or None: Cached prediction tensor, or None if not present.
-        """
+        """Get the cached top-down error tensor for a given layer type."""
         return self._error_cache.get(layer_type, None)
 
     def get_energy(self) -> Optional[float]:
-        """
-        Get the accumulated energy for the layer (if error holding is enabled).
-
-        Returns:
-            float or None: The accumulated energy value, or None if not computed.
-        """
+        """Get the accumulated energy for the layer."""
         return self._energy
 
     def clear_energy(self):
-        """
-        Clear the stored energy and cached states for the layer.
-        """
+        """Clear the stored energy and cached states for the layer."""
         self._energy = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
+        
     def get_errors(self) -> list:
-        """
-        Get the list of error values accumulated during inference.
-
-        Returns:
-            list: List of error dictionaries for each inference step.
-        """
+        """Get the list of error values accumulated during inference."""
         return self._errors
 
     def clear_errors(self):
-        """
-        Clear the stored errors for the layer.
-        """
+        """Clear the stored errors for the layer."""
         self._errors = []
         
     def set_learning_rate(self, lr: float):
-        """
-        Set the local learning rate for the layer.
-        This method allows dynamic adjustment of the learning rate during training or inference.
-        """
+        """Set the local learning rate for the layer."""
         self.local_lr = lr
         
     def get_learning_rate(self) -> float:
-        """
-        Get the current local learning rate for the layer.
-        
-        Returns:
-            float: The current local learning rate.
-        """
+        """Get the current local learning rate for the layer."""
         return self.local_lr
