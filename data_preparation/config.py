@@ -1,12 +1,19 @@
-import os
-class Config:
-    VOCAB_SIZE = None
-    PAD_ID=None
-    EOS_ID=None
-    MAX_LENGTH = 128
-    DATASET_NAME = "ptb"  # "ptb" for penntreebank "opwb" for OpenWebText
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
-    DATA_DIR = os.path.join(BASE_DIR, "data") 
-    TOKENIZER_DIR = os.path.join(BASE_DIR, "tokenizer", "outputs")  
-    BATCH_SIZE = 8
-    num_workers = 8
+from pathlib import Path
+
+base_dir = Path(__file__).resolve().parent.parent 
+data_dir = base_dir / "data_preparation" / "data" / "ptb"
+encoded_dir = base_dir / "data_preparation" / "encoded"
+tokenizer_path = base_dir / "data_preparation" / "tokenizer.json"
+
+# Dataset files
+train_path = data_dir / "train.txt"
+valid_path = data_dir / "valid.txt"
+test_path = data_dir / "test.txt"
+
+# Tokenizer parameters
+vocab_size = 4000
+special_tokens = ["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
+
+# Training parameters
+batch_size = 8
+max_len = 128   # sequence length 

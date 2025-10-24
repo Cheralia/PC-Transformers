@@ -7,13 +7,15 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from data_preparation.dataloader import get_loaders
 import torch.nn.functional as F
-from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
+from utils.model_utils import load_model, reset_pc_modules
 from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils.device_utils import setup_device, cleanup_memory
 import argparse
+from data_preparation.config import vocab_size
+
 """
 This script evaluates the performance of the predictive coding transformer model.
 
@@ -23,13 +25,11 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> eval.py
 
 local_rank, device, use_ddp = setup_device()
 
-def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
+def evaluate(model, dataloader, max_batches=None, device = None):
     model.eval()
     total_energy = 0.0
     batch_count = 0
     total_ce_loss = 0.0
-    pad_token_id = tokenizer.pad_token_id
-    vocab_size = len(tokenizer)
     
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
@@ -51,7 +51,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         targets = batch["target_ids"].to(device)
 
         if local_rank == 0:
-            if (targets == pad_token_id).sum() == 0:
+            if (targets == 0).sum() == 0:
                 print(f"No pad tokens detected in batch {batch_idx + 1}, check padding behavior.")
 
         # Clip targets to valid range before using them for loss calculation
@@ -63,7 +63,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             targets.view(-1),
-            ignore_index=pad_token_id,
+            ignore_index=0,
         )
         total_ce_loss += ce_loss.item()
 
@@ -123,11 +123,7 @@ def main():
     if use_ddp and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
 
-    print(f"[Rank {local_rank}] Using device: {device}")
-
-    tokenizer = load_tokenizer()
-    vocab_size = len(tokenizer)
-    
+    print(f"[Rank {local_rank}] Using device: {device}")    
     best_config = load_best_config()
     
     config = GPTConfig(
@@ -143,7 +139,6 @@ def main():
         num_epochs = 1,
         internal_energy_fn_name="pc_e",
         output_energy_fn_name="pc_e",
-        eos_token_id = tokenizer.eos_token_id,
         combined_internal_weight=0.3,
         combined_output_weight=0.7,
         update_bias = best_config["update_bias"]        
@@ -158,7 +153,7 @@ def main():
 
     # Max batches can be set to limit evaluation, or None for full dataset
     start_time = time.time()
-    evaluate(model, test_loader, tokenizer, max_batches= None, device=device)
+    evaluate(model, test_loader, max_batches= None, device=device)
     elapsed = time.time() - start_time
     if not dist.is_initialized() or dist.get_rank() == 0:
         print(f"Evaluation completed in {elapsed:.2f} seconds")  
