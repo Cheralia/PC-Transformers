@@ -1,12 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
 
-"""
-predictive_coding.config
-
-This module defines the GPTConfig dataclass, which holds configuration parameters for the predictive coding transformer model.
-"""
-
 @dataclass
 class GPTConfig:
     """
@@ -33,21 +27,20 @@ class GPTConfig:
     vocab_size: int
     block_size: int
     lr: float
-    peak_learning_rate: Optional[float] = None
-    warmup_steps: Optional[int] = None
-    la: float=0.5
-    n_embed: int =208
-    dropout: float = 0.1
-    T: int = 10
-    update_bias: bool = True
-    num_heads: int = 16
-    n_blocks: int = 4
-    batch_size: int = 8
-    num_epochs: int = 5
-    use_lateral: bool = True
-    internal_energy_fn_name:str="pc_e",
-    output_energy_fn_name: str="kld",
-    eos_token_id: int = None
-    use_flash_attention: bool = False
-    combined_internal_weight: float = 0.3
-    combined_output_weight: float = 0.7
+    peak_learning_rate: Optional[float]
+    warmup_steps: Optional[int] 
+    la: float
+    n_embed: int 
+    dropout: float 
+    T: int 
+    update_bias: bool 
+    num_heads: int 
+    n_blocks: int 
+    batch_size: int
+    num_epochs: int
+    use_lateral: bool
+    internal_energy_fn_name:str
+    output_energy_fn_name: str
+    use_flash_attention: bool
+    combined_internal_weight: float 
+    combined_output_weight: float
