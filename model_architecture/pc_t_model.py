@@ -16,12 +16,6 @@ class PCTransformer(nn.Module):
     """
 
     def __init__(self, config):
-        """
-        Initialize the PCTransformer model.
-
-        Args:
-            config: Configuration object containing model hyperparameters (e.g., n_blocks, vocab_size, T, etc.).
-        """
         super().__init__()
         self.config = config
         self.embedding = Embedding_Layer(config)
@@ -31,7 +25,7 @@ class PCTransformer(nn.Module):
     def register_all_lateral_weights(self):
         """
         Register lateral weights for all predictive coding layers in the model.
-        This enables lateral (recurrent) connections for local learning in each layer.
+        This enables lateral connections for local learning in each layer.
         """
         for block in self.blocks:
             block.attn.pc_qkv.register_lateral("attn", block.attn.q.in_features)
