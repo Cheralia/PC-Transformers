@@ -4,7 +4,7 @@ from predictive_coding.config import GPTConfig
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids, compute_text_metrics
 from utils.config_utils import load_best_config
 import torch.nn.functional as F
-from Data_preprocessing.dataloader import get_loaders
+from data_preparation.dataloader import get_loaders
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils.device_utils import setup_device

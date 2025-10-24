@@ -1,7 +1,7 @@
 import torch
 import psutil
 from torch.utils.data import Subset, DataLoader
-from Data_preprocessing.dataloader import get_loaders
+from data_preparation.dataloader import get_loaders
 from utils.model_utils import pad_collate_fn, load_tokenizer
 
 def get_optimal_data_sizes():

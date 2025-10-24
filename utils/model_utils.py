@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn.functional as F
 from transformers import GPT2TokenizerFast
-from Data_preprocessing.config import Config
+from data_preparation.config import Config
 from model_architecture.pc_t_model import PCTransformer
 from bert_score import score as bertscore
 from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
