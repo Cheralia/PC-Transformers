@@ -1,19 +1,21 @@
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from torch.utils.data import DataLoader, DistributedSampler
-from data_preparation.datasets.merged_sets import TokenizedDataset
-from data_preparation.config import Config
-from utils.model_utils import pad_collate_fn, load_tokenizer
+from data_preparation.config import encoded_dir, max_len, batch_size
+from data_preparation.dataset import EncodedDataset
 
 def get_datasets():
-    train_dataset = TokenizedDataset("train", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
-    valid_dataset = TokenizedDataset("valid", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
-    test_dataset = TokenizedDataset("test", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
-
+    """ Load train, validation, and test datasets from encoded token ID files."""
+    train_dataset = EncodedDataset(encoded_dir/"train.pt", max_len)
+    valid_dataset = EncodedDataset(encoded_dir/"valid.pt", max_len)
+    test_dataset = EncodedDataset(encoded_dir/"test.pt", max_len)
+    
     return train_dataset, valid_dataset, test_dataset
 
 def get_loaders(distributed: bool = False):
-    tokenizer = load_tokenizer()
-    pad_token_id = tokenizer.pad_token_id
+    """Wrap datasets into PyTorch DataLoaders with batching and shuffling."""
     train_dataset, valid_dataset, test_dataset = get_datasets()
     
     if distributed:
@@ -25,33 +27,22 @@ def get_loaders(distributed: bool = False):
 
     train_loader = DataLoader(
         train_dataset, 
-        batch_size=Config.BATCH_SIZE, 
+        batch_size= batch_size, 
         sampler=train_sampler,
-        shuffle=(train_sampler is None),  
-        num_workers=Config.num_workers,
-        pin_memory=False,                            
-        collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id),
-        persistent_workers=Config.num_workers > 0,
+        shuffle=(train_sampler is None), 
         drop_last=True
     )
     valid_loader = DataLoader(
         valid_dataset, 
-        batch_size=Config.BATCH_SIZE,
-        sampler=valid_sampler, 
-        shuffle = False,
-        num_workers=Config.num_workers,
-        pin_memory=False,
-        collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id),
-        persistent_workers=Config.num_workers > 0
+        batch_size= batch_size,
+        sampler=valid_sampler,
+        shuffle=False,  
     )
     test_loader = DataLoader(
         test_dataset, 
-        batch_size=Config.BATCH_SIZE, 
+        batch_size= batch_size,
         sampler=test_sampler,
-        shuffle = False,
-        num_workers=Config.num_workers,
-        pin_memory=False,
-        collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id),
-        persistent_workers=Config.num_workers > 0)
+        shuffle=False,
+    )
 
     return train_loader, valid_loader, test_loader

@@ -9,7 +9,7 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from data_preparation.dataloader import get_loaders
-from utils.model_utils import load_tokenizer, reset_pc_modules
+from utils.model_utils import reset_pc_modules
 from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
 from eval import evaluate
@@ -19,6 +19,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.device_utils import setup_device, cleanup_memory
 import json
 import logging
+from data_preparation.config import vocab_size
 
 """
 This script trains the predictive coding transformer model on the provided dataset.
@@ -28,13 +29,11 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
 
 """
 
-def train(model, dataloader, tokenizer, config, global_step, device, logger):
+def train(model, dataloader, config, global_step, device, logger):
     model.train()
     total_ce_loss = 0.0
     total_energy = 0.0
     batch_count = 0
-    pad_token_id = tokenizer.pad_token_id
-    vocab_size = len(tokenizer)
 
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
@@ -69,7 +68,7 @@ def train(model, dataloader, tokenizer, config, global_step, device, logger):
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             target_ids.view(-1),
-            ignore_index=pad_token_id
+            ignore_index=0
         )
         total_ce_loss += ce_loss.item()
 
@@ -128,8 +127,6 @@ def main():
     if use_ddp and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
 
-    tokenizer = load_tokenizer()
-    vocab_size = len(tokenizer)
     rank = dist.get_rank() if dist.is_initialized() else 0
 
     best_config = load_best_config()   
@@ -173,7 +170,6 @@ def main():
         use_lateral = True,
         internal_energy_fn_name="pc_e",
         output_energy_fn_name="pc_e",
-        eos_token_id=tokenizer.eos_token_id,
         combined_internal_weight=0.7,
         combined_output_weight=0.3,
         use_flash_attention=True  
@@ -224,13 +220,13 @@ def main():
 
         model.train()
         train_energy, train_perplexity, global_step = train(
-            model, train_loader, tokenizer, config, global_step, device, logger
+            model, train_loader, config, global_step, device, logger
         )
         train_energies.append(train_energy)
 
         model.eval()
         val_energy, val_perplexity = evaluate(
-            model, valid_loader, tokenizer, max_batches=None, device=device
+            model, valid_loader, max_batches=None, device=device
         )
         
         val_energies.append(val_energy)
