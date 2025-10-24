@@ -50,8 +50,8 @@ def train(model, dataloader, config, global_step, device, logger):
             target_ids = torch.clamp(target_ids, max=vocab_size - 1)
 
         if global_step < config.warmup_steps:
-            lr = config.local_learning_rate + global_step / config.warmup_steps * (
-                config.peak_learning_rate - config.local_learning_rate)
+            lr = config.lr + global_step / config.warmup_steps * (
+                config.peak_learning_rate - config.lr)
         else:
             lr = config.peak_learning_rate
 
@@ -154,15 +154,13 @@ def main():
    
     config = GPTConfig(
         vocab_size = vocab_size,
-
         block_size = best_config["block_size"],
+        lr = 1e-5,
         peak_learning_rate = best_config["peak_learning_rate"],
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
-        local_learning_rate = 1e-5,
         T = best_config["T"],
-        is_holding_error = True,
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
         num_epochs = 20, 

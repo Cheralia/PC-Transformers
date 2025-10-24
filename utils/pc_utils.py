@@ -41,7 +41,7 @@ def get_head_similarity(mu_heads):
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     return torch.randn(batch_size, seq_len, embedding_size, device = device)
 
-def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update, layer_norm, mu_word_cache=None, mu_pos_cache=None):
+def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, requires_update, layer_norm, mu_word_cache=None, mu_pos_cache=None):
     """
     Perform a predictive coding update step for the embedding layer.
     Now supports vectorized updates and caching of mu_word/mu_pos for inference.
@@ -56,7 +56,6 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
         local_lr (float): Local learning rate.
         clamp_value (float): Value to clamp updates.
         energy_fn_name (str): Name of energy function.
-        is_holding_error (bool): Whether to accumulate errors.
         requires_update (bool): Whether to update weights.
         mu_word_cache, mu_pos_cache: Optional cached values for inference.
     Returns:
@@ -91,7 +90,7 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
         error = target - mu_norm
         if not requires_update:
             if t == T - 1:
-                finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
+                finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name)
             return mu, mu_word, mu_pos, error
 
         
@@ -107,11 +106,11 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
             pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
             
     if t == T - 1:
-           finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
+           finalize_step(mu, target, error, t, layer_type, energy_fn_name)
   
     return mu, mu_word, mu_pos, error
     
-def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, td_err, layer_norm):
+def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, energy_fn_name, update_bias, requires_update, td_err, layer_norm):
     """
     Perform a predictive coding update step for a linear (fully connected) layer.
 
@@ -126,7 +125,6 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         local_lr (float): Local learning rate.
         clamp_value (float): Value to clamp updates.
         use_lateral (bool): Whether to use lateral connections.
-        is_holding_error (bool): Whether to accumulate errors.
         energy_fn_name (str): Name of energy function.
         update_bias (bool): Whether to update bias.
         requires_update (bool): Whether to update weights.
@@ -191,11 +189,11 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
     x = torch.clamp(x, -clamp_value, clamp_value)
     if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+        finalize_step(mu, target, error, t, layer_type,energy_fn_name)
 
     return x, mu, bu_err
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, td_err,layer_norm, flash=False):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, td_err,layer_norm, flash=False):
         assert proj_layers is not None, "proj_layers dict is required for attention"
         device = x.device
         x=layer_norm(x)
@@ -282,7 +280,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
                     proj.bias.data.add_(delta_b)
  
         if t == T - 1:
-            finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+            finalize_step(mu, target, error, t, layer_type,energy_fn_name)
      
         return x, mu, bu_err
     
@@ -314,7 +312,7 @@ def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Te
         raise ValueError(f"Unknown energy function: {energy_fn_name}. Choose from {list(ENERGY_FUNCTIONS.keys())}")
     return ENERGY_FUNCTIONS[energy_fn_name](mu, x)
 
-def finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error = False):
+def finalize_step(mu, target, error, t, layer_type,energy_fn_name):
     """
     Finalize a predictive coding inference step by computing energy and error statistics.
 
@@ -325,14 +323,13 @@ def finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_er
         t (int): Current inference step.
         layer_type (str): Layer type string.
         energy_fn_name (str): Name of energy function.
-        is_holding_error (bool): Whether to accumulate errors.
     Returns:
         tuple: (energy value, list of error statistics)
     """
     device = mu.device
     target = target.to(device)
     error = error.to(device)
-    energy = energy_fn(mu, target,energy_fn_name).mean().item() if is_holding_error else None
+    energy = energy_fn(mu, target,energy_fn_name).mean().item()
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
     

@@ -20,8 +20,7 @@ class PCLayer(nn.Module):
     def __init__(
         self,
         T: int = 1,
-        local_learning_rate: float = 1e-3,
-        is_holding_error: bool = False,
+        lr: float = 1e-3,
         update_bias: bool = True,
         energy_fn_name: str = "scaled_mse",
         num_heads: Optional[int] = None,
@@ -33,15 +32,13 @@ class PCLayer(nn.Module):
 
         Args:
             T (int): Number of inference steps.
-            local_learning_rate (float): Learning rate for local/lateral updates.
-            is_holding_error (bool): Whether to accumulate and store errors.
+            lr (float): Learning rate for local/lateral updates.
             update_bias (bool): Whether to update bias terms during learning.
             energy_fn_name (str): Name of the energy function to use for error computation.
         """
         super().__init__()
         self.T = T
-        self.local_lr = local_learning_rate
-        self.is_holding_error = is_holding_error
+        self.local_lr = lr
         self.update_bias = update_bias
         self.clamp_value = 3.0
         self.W_latents = nn.ParameterDict()
@@ -128,7 +125,7 @@ class PCLayer(nn.Module):
             use_cache = (not requires_update) and (self._embed_cache["step"] == t)
             mu, mu_word, mu_pos, bu_err = step_embed(
                 t, T, target_activity, layer, layer_type, input_ids, position_ids,
-                self.local_lr, self.clamp_value, self.energy_fn_name, self.is_holding_error,
+                self.local_lr, self.clamp_value, self.energy_fn_name,
                 requires_update, layer_norm=layer_norm,
                 mu_word_cache=self._embed_cache["mu_word"] if use_cache else None,
                 mu_pos_cache=self._embed_cache["mu_pos"] if use_cache else None
@@ -140,25 +137,23 @@ class PCLayer(nn.Module):
                 self._embed_cache["step"] = t
         elif layer_type == "attn":
             # Step attention takes arguments strictly in order: t, T, target_activity, x, W_latents, proj_layers, layer_type,
-            # local_lr, clamp_value, use_lateral, is_holding_error, energy_fn
+            # local_lr, clamp_value, use_lateral, energy_fn
             x, mu, bu_err = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type,
-                              self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
+                              self.local_lr, self.clamp_value, self.use_lateral,
                               self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, self.n_embed, self.la, td_err=td_err, layer_norm=layer_norm, flash=flash)
         else:
             x, mu, bu_err = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type,
-                               self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
+                               self.local_lr, self.clamp_value, self.use_lateral,
                                self.energy_fn_name, self.update_bias, requires_update,td_err=td_err, layer_norm=layer_norm)
         
         self._mu_cache[layer_type] = mu.detach().clone()  
         if bu_err is not None: 
          self._error_cache[layer_type] = bu_err.detach().clone()   
         
-        if self.is_holding_error:
-            error = target_activity - mu
-            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type,
-                                                self.energy_fn_name, self.is_holding_error)
-            self._energy += energy
-            self._errors.extend(step_errors)
+        error = target_activity - mu
+        energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+        self._energy += energy
+        self._errors.extend(step_errors)
 
         if layer_type == "embed":
             # Cache updated x for next step inference

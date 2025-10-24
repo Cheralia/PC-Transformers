@@ -17,11 +17,10 @@ class GPTConfig:
         block_size (int): Maximum sequence length.
         n_embed (int): Embedding dimension size.
         dropout (float): Dropout probability.
-        local_learning_rate (float): Local learning rate for predictive coding layers.
+        lr (float): Local learning rate for predictive coding layers.
         peak_learning_rate (float): Peak learning rate for learning rate scheduling.
         warmup_steps (int): Number of warmup steps for learning rate scheduling.
         T (int): Number of inference steps for predictive coding.
-        is_holding_error (bool): Whether to accumulate and store errors.
         update_bias (bool): Whether to update bias terms during learning.
         num_heads (int): Number of attention heads.
         n_blocks (int): Number of transformer blocks.
@@ -33,14 +32,13 @@ class GPTConfig:
     """
     vocab_size: int
     block_size: int
-    local_learning_rate: float
+    lr: float
     peak_learning_rate: Optional[float] = None
     warmup_steps: Optional[int] = None
     la: float=0.5
     n_embed: int =208
     dropout: float = 0.1
     T: int = 10
-    is_holding_error: bool = False
     update_bias: bool = True
     num_heads: int = 16
     n_blocks: int = 4

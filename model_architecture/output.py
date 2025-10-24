@@ -11,15 +11,14 @@ class OutputLayer(nn.Module):
         Initialize the OutputLayer.
 
         Args:
-            config: Configuration object with n_embed, vocab_size, T, local_learning_rate, etc.
+            config: Configuration object with n_embed, vocab_size, T, lr, etc.
         """
         super().__init__()
         self.config = config
         self.output = nn.Linear(config.n_embed, config.vocab_size)
         self.pc_layer = PCLayer(
             T=config.T,
-            local_learning_rate=config.local_learning_rate,
-            is_holding_error=config.is_holding_error,
+            lr=config.lr,
             update_bias = config.update_bias,
             energy_fn_name=config.output_energy_fn_name,
         )
