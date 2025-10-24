@@ -76,48 +76,64 @@ class PCTransformer(nn.Module):
         self.embedding.pc_layer.init_x(
             batch_size=B,
             seq_len=S,
-            layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
             layer_type="embed",
+            device = device,
+            layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
+            proj_layers=None,
             input_ids=input_ids,
             position_ids=position_ids,
-            device=device
         )
 
         for block in self.blocks:
             block.attn.pc_qkv.init_x(
                 batch_size=B,
                 seq_len=S,
-                proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
                 layer_type="attn",
-                device=device
+                device = device,
+                layer = None,
+                proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                input_ids = None,
+                position_ids = None,
             )
             block.attn.pc_output.init_x(
                 batch_size=B,
                 seq_len=S,
-                layer=block.attn.output,
                 layer_type="linear_attn",
-                device=device
+                device=device,
+                layer=block.attn.output,
+                proj_layers= None, 
+                input_ids = None,
+                position_ids = None,
             )
             block.mlp.pc_layer1.init_x(
                 batch_size=B,
                 seq_len=S,
-                layer=block.mlp.fc1,
                 layer_type="fc1",
-                device=device
+                device=device,
+                layer=block.mlp.fc1,
+                proj_layers= None, 
+                input_ids = None,
+                position_ids = None,
             )
             block.mlp.pc_layer2.init_x(
                 batch_size=B,
                 seq_len=S,
-                layer=block.mlp.fc2,
                 layer_type="fc2",
-                device=device
+                device=device,
+                layer=block.mlp.fc2,
+                proj_layers= None, 
+                input_ids = None,
+                position_ids = None,
             )
         self.output.pc_layer.init_x(
             batch_size=B,
             seq_len=S,
-            layer=self.output.output,
             layer_type="linear_output",
-            device=device
+            device=device,
+            layer=self.output.output,
+            proj_layers= None, 
+            input_ids = None,
+            position_ids = None,
         )
 
         # Initialize streams or futures for parallel execution
@@ -131,12 +147,18 @@ class PCTransformer(nn.Module):
                 streams_or_futures,
                 self.output.pc_layer.forward,
                 target_activity=target_logits,
-                layer=self.output.output,
                 layer_type="linear_output",
                 t=t,
                 T=self.config.T,
                 requires_update=self.training,
-                td_err= td_mlp2  #it's preferable to make the td error None for the output layer 
+                td_err= td_mlp2,
+                layer=self.output.output,
+                layer_norm=None,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+                flash=False
+
             )
 
             # Iterate through blocks in reverse order for parallel execution
@@ -159,13 +181,18 @@ class PCTransformer(nn.Module):
                     streams_or_futures,
                     block.mlp.pc_layer2.forward,
                     target_activity=next_target,
-                    layer=block.mlp.fc2,
                     layer_type="fc2",
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
                     td_err= td_mlp1,
-                    layer_norm=layer_norm2
+                    layer=block.mlp.fc2,
+                    layer_norm=layer_norm2,
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    flash=False
+
                 )
                 td_attn_op = block.attn.pc_output.get_td_err("linear_attn") if t > 0 else None
 
@@ -175,13 +202,18 @@ class PCTransformer(nn.Module):
                     streams_or_futures,
                     block.mlp.pc_layer1.forward,
                     target_activity=block.mlp.pc_layer2.get_x("fc2"),
-                    layer=block.mlp.fc1,
                     layer_type="fc1",
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
                     td_err= td_attn_op,
-                    layer_norm=block.ln1
+                    layer=block.mlp.fc1,
+                    layer_norm=block.ln1, 
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    flash=False
+
                 )
                 
                 if idx == 0:
@@ -198,13 +230,18 @@ class PCTransformer(nn.Module):
                     streams_or_futures,
                     block.attn.pc_output.forward,
                     target_activity=block.mlp.pc_layer1.get_x("fc1"),
-                    layer=block.attn.output,
                     layer_type="linear_attn",
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
                     td_err= td_attn_qkv,
-                    layer_norm=block.ln1
+                    layer=block.attn.output, 
+                    layer_norm=block.ln1,
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    flash=False
+
                 )
 
                 # Execute attention QKV
@@ -213,15 +250,18 @@ class PCTransformer(nn.Module):
                     streams_or_futures,
                     block.attn.pc_qkv.forward,
                     target_activity=block.attn.pc_output.get_x("linear_attn"),
-                    proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
                     layer_type="attn",
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
                     td_err= td_embed,
+                    layer = None,
+                    layer_norm=block.ln2,
+                    proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                    input_ids=None,
+                    position_ids=None,
                     flash=getattr(self.config, 'use_flash_attention', False),
-                    layer_norm=block.ln2
-            
+
                 )
 
             # Execute embedding layer
@@ -230,14 +270,17 @@ class PCTransformer(nn.Module):
                 streams_or_futures,
                 self.embedding.pc_layer.forward,
                 target_activity=self.blocks[0].attn.pc_qkv.get_x("attn"),
-                layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
                 layer_type="embed",
-                input_ids=input_ids,
-                position_ids=position_ids,
                 t=t,
                 T=self.config.T,
                 requires_update=self.training,
-                layer_norm= block.ln2
+                td_err = None,
+                layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
+                layer_norm= block.ln2,
+                proj_layers=None,
+                input_ids=input_ids,
+                position_ids=position_ids,
+                flash=False
             )
 
             # Synchronize all parallel tasks
