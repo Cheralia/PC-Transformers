@@ -105,17 +105,18 @@ def main():
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size = best_config["block_size"],
+        la = 0.5,
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
         lr = best_config["peak_learning_rate"],
         T = best_config["T"],
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
+        batch_size = 8,
         num_epochs = 1,
         internal_energy_fn_name="pc_e",
         output_energy_fn_name="pc_e",
         update_bias = best_config["update_bias"],
-        eos_token_id = tokenizer.eos_token_id
     )
     
     model_path = "checkpoints/final_model.pt"
