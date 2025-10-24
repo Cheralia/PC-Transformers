@@ -21,8 +21,7 @@ class Embedding_Layer(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
         
         self.pc_layer= PCLayer(T=config.T,
-                               local_learning_rate=config.local_learning_rate,
-                               is_holding_error= config.is_holding_error,
+                               lr=config.lr,
                                update_bias = config.update_bias,
                                energy_fn_name=config.internal_energy_fn_name,
                                

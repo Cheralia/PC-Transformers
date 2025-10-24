@@ -29,9 +29,8 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         warmup_steps=warmup_steps,
         n_embed=n_embed,
         dropout=dropout,
-        local_learning_rate=1e-5, 
+        lr=1e-5, 
         T=T,
-        is_holding_error=True,
         num_heads=num_heads,
         n_blocks=n_blocks,
         num_epochs=3,
@@ -46,8 +45,8 @@ def update_global_config(config):
     """Update global GPTConfig"""
     config_keys = [
         'num_heads', 'n_embed', 'block_size', 'n_blocks', 'vocab_size',
-        'dropout', 'local_learning_rate', 'peak_learning_rate', 'warmup_steps',
-        'update_bias', 'use_lateral', 'T', 'is_holding_error', 
+        'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
+        'update_bias', 'use_lateral', 'T', 
         'internal_energy_fn_name', 'output_energy_fn_name'
     ]
     

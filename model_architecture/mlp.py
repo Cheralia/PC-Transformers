@@ -13,7 +13,7 @@ class MLP(nn.Module):
         Initialize the MLP block.
 
         Args:
-            config: Configuration object with n_embed, T, local_learning_rate, etc.
+            config: Configuration object with n_embed, T, lr, etc.
         """
         super().__init__()
         self.fc1 = nn.Linear(config.n_embed, 4 * config.n_embed)
@@ -22,16 +22,14 @@ class MLP(nn.Module):
 
         self.pc_layer2 = PCLayer(
             T=config.T,
-            local_learning_rate=config.local_learning_rate,
-            is_holding_error=config.is_holding_error,
+            lr=config.lr,
             update_bias=config.update_bias,
             energy_fn_name=config.internal_energy_fn_name,
         )
 
         self.pc_layer1 = PCLayer(
             T=config.T,
-            local_learning_rate=config.local_learning_rate,
-            is_holding_error=config.is_holding_error,
+            lr=config.lr,
             update_bias=config.update_bias,
             energy_fn_name=config.internal_energy_fn_name,
         )
