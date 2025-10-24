@@ -1,14 +1,26 @@
 import torch
 import torch.nn as nn
-from typing import Optional
-from utils.pc_utils import x_init, step_embed, step_linear, step_attn, finalize_step
+from typing import Optional, Dict, Any
+
+from utils.pc_utils import (
+    x_init,
+    step_embed,
+    step_linear,
+    step_attn,
+    finalize_step,
+)
+
+def _device_of(params: nn.Module) -> torch.device:
+    """Return device of first parameter in module or CUDA if available otherwise CPU."""
+    params_list = list(params.parameters())
+    if params_list:
+        return params_list[0].device
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class PCLayer(nn.Module):
     """
-    Predictive Coding Layer for neural network modules.
-
-    Supports iterative inference, local learning, and optional lateral (recurrent) connections.
-    Can be used for embedding, attention, or linear layers.
+    Predictive Coding Layer wrapper that manages iterative inference state and
+    delegates computation to helper functions (step_embed, step_attn, step_linear).
     """
     def __init__(
         self,
@@ -20,52 +32,42 @@ class PCLayer(nn.Module):
         n_embed: Optional[int] = None,
         la: Optional[float] = None,
     ):
-        """
-        Initialize the PCLayer.
-
-        Args:
-            T (int): Number of inference steps.
-            lr (float): Learning rate for local/lateral updates.
-            update_bias (bool): Whether to update bias terms during learning.
-            energy_fn_name (str): Name of the energy function to use for error computation.
-            num_heads (Optional[int]): Number of attention heads (only for attention layers).
-            n_embed (Optional[int]): Embedding dimension (only for attention layers).
-            la (Optional[float]): Lateral attention weight (only for attention layers).
-        """
         super().__init__()
         self.T = T
         self.local_lr = lr
         self.update_bias = update_bias
         self.clamp_value = 3.0
-        self.W_latents = nn.ParameterDict()
         self.use_lateral = True
-        self._x_cache = {}
-        self._mu_cache={}
-        self._error_cache = {}
         self.energy_fn_name = energy_fn_name 
-        self._energy = 0.0
-        self._errors = []
         self.num_heads = num_heads
         self.n_embed = n_embed
         self.la = la
-
+        
+        self.W_latents = nn.ParameterDict()
+        
+        self._x_cache: Dict[str, torch.Tensor] = {}
+        self._mu_cache: Dict[str, torch.Tensor] = {}
+        self._error_cache: Dict[str, torch.Tensor] = {}
+        self._embed_cache: Dict[str, any] = {"mu_word": None, "mu_pos": None, "step": -1}
+        self._energy = 0.0
+        self._errors = []
+    
     def register_lateral(self, layer_type: str, size: int):
-        """
-        Register a lateral (recurrent) weight matrix for a given layer type.
+        """Create and register a lateral parameter matrix for `layer_type` if not present."""
+        if layer_type in self.W_latents:
+            return
+        device = _device_of(self)
+        W = torch.empty(size, size, device=device)
+        nn.init.xavier_uniform_(W)
+        self.W_latents[layer_type] = nn.Parameter(W)
 
-        Args:
-            layer_type (str): The type of layer (e.g., 'attn', 'fc1', 'linear').
-            size (int): The size of the square lateral weight matrix.
-        """
-        if not hasattr(self, 'W_latents'):
-            self.W_latents = {}
-
-        if layer_type not in self.W_latents:
-            device = next(self.parameters()).device if list(self.parameters()) else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            W = torch.empty(size, size, device=device)
-            nn.init.xavier_uniform_(W)
-            self.W_latents[layer_type] = nn.Parameter(W)
-
+    def _reset_step_state(self) -> None:
+        """Reset step-local accumulators, kept for future extension."""
+        return
+    
+    def _get_cached_state(self, layer_type: str):
+        return self._x_cache.get(layer_type, None)
+    
     def forward(
         self,
         target_activity: torch.Tensor,
@@ -81,66 +83,91 @@ class PCLayer(nn.Module):
         position_ids: Optional[torch.Tensor] = None,
         flash: bool = False,
     ):
-        """
-        Perform a single predictive coding inference step for the layer.
-
-        Args:
-            target_activity (torch.Tensor): Target activity tensor for the layer.
-            layer (nn.Module, optional): The layer module (for linear layers).
-            layer_norm (nn.Module, optional): Layer normalization module.
-            proj_layers (dict, optional): Dictionary of projection layers (for attention).
-            layer_type (str): Type of layer ('embed', 'attn', 'fc1', 'linear', etc.).
-            input_ids (torch.Tensor, optional): Input token IDs (for embedding layers).
-            position_ids (torch.Tensor, optional): Position IDs (for embedding layers).
-            t (int): Current inference step.
-            T (int): Total number of inference steps.
-            requires_update (bool): Whether to update weights.
-            flash (bool): Whether to use flash attention (if available).
-            td_err (torch.Tensor, optional): Top-down error from above layer.
-        Returns:
-            torch.Tensor or tuple: Updated activity tensor(s) for the layer.
-        """
-        x = None
-        self._energy = 0.0
-        self._errors = []
-        
-        if layer_type == "embed":
-            if "embed" not in self._x_cache:
-                raise ValueError("Embedding state not initialized. Call init_x first.")
-            x_word, x_pos = self._x_cache["embed"]
-        else:
-            if layer_type not in self._x_cache:
-                raise ValueError(f"{layer_type} state not initialized. Call init_x first.")
-            x = self._x_cache[layer_type]
+        """Perform one predictive coding inference step."""
+        self._reset_step_state()
+        x = self._get_cached_state(layer_type)
 
         if layer_type == "embed":
-            # Caching for mu_word and mu_pos during inference
-            if not hasattr(self, '_embed_cache'):
-                self._embed_cache = {"mu_word": None, "mu_pos": None, "step": -1}
             use_cache = (not requires_update) and (self._embed_cache["step"] == t)
             mu, mu_word, mu_pos, bu_err = step_embed(
-                t, T, target_activity, layer, layer_type, input_ids, position_ids,
-                self.local_lr, self.clamp_value, self.energy_fn_name,
-                requires_update, layer_norm=layer_norm,
+                t,
+                T,
+                target_activity,
+                layer,
+                layer_type,
+                input_ids,
+                position_ids,
+                self.local_lr,
+                self.clamp_value,
+                self.energy_fn_name,
+                requires_update,
+                layer_norm=layer_norm,
                 mu_word_cache=self._embed_cache["mu_word"] if use_cache else None,
                 mu_pos_cache=self._embed_cache["mu_pos"] if use_cache else None
             )
-            # Update cache if not requires_update or first step
+            
+            # Update cache 
             if not requires_update or t == 0:
                 self._embed_cache["mu_word"] = mu_word
                 self._embed_cache["mu_pos"] = mu_pos
                 self._embed_cache["step"] = t
-        elif layer_type == "attn":
-            # Step attention takes arguments strictly in order: t, T, target_activity, x, W_latents, proj_layers, layer_type,
-            # local_lr, clamp_value, use_lateral, energy_fn
-            x, mu, bu_err = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type,
-                              self.local_lr, self.clamp_value, self.use_lateral,
-                              self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, self.n_embed, self.la, td_err=td_err, layer_norm=layer_norm, flash=flash)
-        else:
-            x, mu, bu_err = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type,
-                               self.local_lr, self.clamp_value, self.use_lateral,
-                               self.energy_fn_name, self.update_bias, requires_update,td_err=td_err, layer_norm=layer_norm)
+            
+            # store for later retrieval
+            self._x_cache["embed"] = (mu_word, mu_pos)
+            self._mu_cache["embed"] = mu.detach().clone()
+            if bu_err is not None:
+                self._error_cache["embed"] = bu_err.detach().clone()
+
+            # compute energy
+            error = target_activity - mu
+            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+            self._energy += energy
+            self._errors.extend(step_errors)
+            return mu_word, mu_pos
         
+        elif layer_type == "attn":
+            x, mu, bu_err = step_attn(
+                t,
+                T,
+                target_activity,
+                x,
+                self.W_latents,
+                proj_layers,
+                layer_type,
+                self.local_lr,
+                self.clamp_value,
+                self.use_lateral,
+                self.energy_fn_name,
+                self.update_bias,
+                requires_update,
+                self,
+                self.num_heads,
+                self.n_embed,
+                self.la, 
+                td_err=td_err, 
+                layer_norm=layer_norm,
+                flash=flash
+            )
+        else:
+            x, mu, bu_err = step_linear(
+                t,
+                T,
+                target_activity,
+                x,
+                layer, 
+                self.W_latents, 
+                layer_type,
+                self.local_lr, 
+                self.clamp_value, 
+                self.use_lateral,
+                self.energy_fn_name, 
+                self.update_bias, 
+                requires_update,
+                td_err=td_err, 
+                layer_norm=layer_norm
+            )
+            
+        # cache and stats
         self._mu_cache[layer_type] = mu.detach().clone()  
         if bu_err is not None: 
          self._error_cache[layer_type] = bu_err.detach().clone()   
@@ -150,13 +177,9 @@ class PCLayer(nn.Module):
         self._energy += energy
         self._errors.extend(step_errors)
 
-        if layer_type == "embed":
-            # Cache updated x for next step inference
-            self._x_cache["embed"] = (mu_word, mu_pos)
-            return mu_word, mu_pos
-        else:
-            self._x_cache[layer_type] = x
-            return x, mu
+        # update x cache
+        self._x_cache[layer_type] = x
+        return x, mu
 
     def init_x(
         self,
@@ -170,26 +193,17 @@ class PCLayer(nn.Module):
         position_ids: Optional[torch.Tensor] = None,
     ):
         """
-        Initialize the layer's state variables and store them in x_cache.
-
-        Args:
-            batch_size (int): Batch size.
-            seq_len (int): Sequence length.
-            layer (nn.Module, optional): The layer module (for linear layers).
-            proj_layers (dict, optional): Dictionary of projection layers (for attention).
-            layer_type (str): Type of layer ('embed', 'attn', 'fc1', 'linear', etc.).
-            input_ids (torch.Tensor, optional): Input token IDs (for embedding layers).
-            position_ids (torch.Tensor, optional): Position IDs (for embedding layers).
+        Initialize cached activity `x` for the layer type.
+        - embed: stores (x_word, x_pos) from embedding weights
+        - attn: creates random initialization shaped (B, S, H_out)
+        - linear/others: random init sized to layer input dimension
         """
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
-            
-            # Clip input_ids to valid range
             vocab_size = layer["word"].weight.size(0)
             if input_ids.max() >= vocab_size:
                 input_ids = torch.clamp(input_ids, max=vocab_size-1)
             
-            # Position IDs should also be clipped to valid range
             max_pos = layer["pos"].weight.size(0)
             if position_ids.max() >= max_pos:
                 position_ids = torch.clamp(position_ids, max=max_pos-1)
@@ -197,6 +211,7 @@ class PCLayer(nn.Module):
             x_word = layer["word"].weight[input_ids] 
             x_pos = layer["pos"].weight[position_ids] 
             self._x_cache["embed"] = (x_word, x_pos)
+            
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
@@ -205,19 +220,15 @@ class PCLayer(nn.Module):
             
             if self.use_lateral:
                 self.register_lateral(layer_type, H_in)
-                
-                if layer_type in self.W_latents:
-                    self.W_latents[layer_type] = self.W_latents[layer_type].to(device)
+                self.W_latents[layer_type] = self.W_latents[layer_type].to(device)
+        
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
             self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
-            H_in = layer.weight.shape[1]
-
+            
             if self.use_lateral:
-                self.register_lateral(layer_type, H_in)
-
-                
+                self.register_lateral(layer_type, input_dim)  
 
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
         """Get the cached activity tensor for a given layer type."""
@@ -233,7 +244,7 @@ class PCLayer(nn.Module):
 
     def get_energy(self) -> Optional[float]:
         """Get the accumulated energy for the layer."""
-        return self._energy
+        return float(self._energy)
 
     def clear_energy(self):
         """Clear the stored energy and cached states for the layer."""
@@ -251,8 +262,8 @@ class PCLayer(nn.Module):
         
     def set_learning_rate(self, lr: float):
         """Set the local learning rate for the layer."""
-        self.local_lr = lr
+        self.local_lr = float(lr)
         
     def get_learning_rate(self) -> float:
         """Get the current local learning rate for the layer."""
-        return self.local_lr
+        return float(self.local_lr)
