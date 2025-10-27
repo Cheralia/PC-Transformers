@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 import warnings
 import gc
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 from torch.amp import autocast
 from contextlib import nullcontext
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
@@ -120,11 +120,10 @@ def step_linear(
     target: torch.Tensor,
     x: torch.Tensor,
     layer: nn.Module,
-    W_latents: dict,
+    lateral_conn: Optional[Any], 
     layer_type: str,
     local_lr: float,
     clamp_value: float,
-    use_lateral: bool,
     energy_fn_name: str,
     update_bias: bool,
     requires_update: bool,
@@ -149,32 +148,23 @@ def step_linear(
         if layer_type == "fc1":
             mu = F.gelu(mu)
         elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
-              mu = layer_norm(mu)
+            mu = layer_norm(mu)
               
         if layer_type=="linear_output":
-          bu_err= target - F.softmax(mu, dim=-1) 
+            bu_err= target - F.softmax(mu, dim=-1) 
         else:    
-          bu_err = target - mu 
+            bu_err = target - mu 
           
         # project bottom-up error through weights
-        error_proj= bu_err @ layer.weight 
-       
-        if td_err is not None:
-           error= error_proj- td_err
-        else:
-           error= error_proj     
-
-        if use_lateral and (layer_type in W_latents):
-           W_latent = W_latents[layer_type].to(device) 
-           x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
-           delta_x = error + x_latent
+        error_proj= bu_err @ layer.weight      
+        error = error_proj- td_err if td_err is not None else error_proj  
+        
+        if lateral_conn is not None:
+           delta_x = lateral_conn.forward(x, error)
            x = x + local_lr * delta_x
 
            if requires_update:
-               anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-               # update parametrically in-place to preserve Parameter semantics
-               W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
-               W_latents[layer_type].data = F.normalize(W_latents[layer_type].data, p=2, dim=1)
+               lateral_conn.update_weights(x.detach())
         else:
           x= x + local_lr * error 
     
@@ -200,12 +190,11 @@ def step_attn(
     T: int,
     target: torch.Tensor,
     x: torch.Tensor,
-    W_latents: dict,
+    lateral_conn: Optional[Any],
     proj_layers: dict,
     layer_type: str,
     local_lr: float,
     clamp_value: float,
-    use_lateral: bool,
     energy_fn_name: str,
     update_bias: bool,
     requires_update: bool,
@@ -278,18 +267,14 @@ def step_attn(
         setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
         setattr(layer_instance, '_head_similarity_max', similarity.max().item())
         
-    if use_lateral and (layer_type in W_latents):
-        W_latent = W_latents[layer_type].to(device) 
-        x_latent = x @ W_latent
-        delta_x = error + x_latent
-        x = x + local_lr * delta_x 
-
+    if lateral_conn is not None:
+        delta_x = lateral_conn.forward(x, error)
+        x = x + local_lr * delta_x
+        
         if requires_update:
-            anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
-            W_latents[layer_type].data = F.normalize(W_latents[layer_type].data, p=2, dim=1)
+            lateral_conn.update_weights(x.detach())
     else:
-        x= x+ local_lr * error
+        x = x + local_lr * error
 
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
 

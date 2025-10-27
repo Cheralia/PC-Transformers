@@ -167,7 +167,6 @@ def main():
         batch_size = 8,
         num_epochs = 20, 
         update_bias = best_config["update_bias"],
-        use_lateral = True,
         internal_energy_fn_name="pc_e",
         output_energy_fn_name="pc_e",
         combined_internal_weight=0.7,

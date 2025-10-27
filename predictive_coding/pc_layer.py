@@ -9,6 +9,7 @@ from utils.pc_utils import (
     step_attn,
     finalize_step,
 )
+from predictive_coding.lateral_connc import LateralConnections
 
 def _device_of(params: nn.Module) -> torch.device:
     """Return device of first parameter in module or CUDA if available otherwise CPU."""
@@ -37,13 +38,12 @@ class PCLayer(nn.Module):
         self.local_lr = lr
         self.update_bias = update_bias
         self.clamp_value = 3.0
-        self.use_lateral = True
         self.energy_fn_name = energy_fn_name 
         self.num_heads = num_heads
         self.n_embed = n_embed
         self.la = la
         
-        self.W_latents = nn.ParameterDict()
+        self.lateral_connections: Dict[str, LateralConnections] = {}
         
         self._x_cache: Dict[str, torch.Tensor] = {}
         self._mu_cache: Dict[str, torch.Tensor] = {}
@@ -53,13 +53,10 @@ class PCLayer(nn.Module):
         self._errors = []
     
     def register_lateral(self, layer_type: str, size: int):
-        """Create and register a lateral parameter matrix for `layer_type` if not present."""
-        if layer_type in self.W_latents:
-            return
-        device = _device_of(self)
-        W = torch.empty(size, size, device=device)
-        nn.init.xavier_uniform_(W)
-        self.W_latents[layer_type] = nn.Parameter(W)
+        """Create and register lateral connections for layer_type."""
+        if layer_type not in self.lateral_connections:
+            self.lateral_connections[layer_type] = LateralConnections(size, self.local_lr)
+            self.add_module(f"lateral_{layer_type}", self.lateral_connections[layer_type])
 
     def _reset_step_state(self) -> None:
         """Reset step-local accumulators, kept for future extension."""
@@ -126,17 +123,17 @@ class PCLayer(nn.Module):
             return mu_word, mu_pos
         
         elif layer_type == "attn":
+            lateral_conn = self.lateral_connections.get(layer_type, None)
             x, mu, bu_err = step_attn(
                 t,
                 T,
                 target_activity,
                 x,
-                self.W_latents,
+                lateral_conn,
                 proj_layers,
                 layer_type,
                 self.local_lr,
                 self.clamp_value,
-                self.use_lateral,
                 self.energy_fn_name,
                 self.update_bias,
                 requires_update,
@@ -149,17 +146,17 @@ class PCLayer(nn.Module):
                 flash=flash
             )
         else:
+            lateral_conn = self.lateral_connections.get(layer_type, None)
             x, mu, bu_err = step_linear(
                 t,
                 T,
                 target_activity,
                 x,
                 layer, 
-                self.W_latents, 
+                lateral_conn,  
                 layer_type,
                 self.local_lr, 
                 self.clamp_value, 
-                self.use_lateral,
                 self.energy_fn_name, 
                 self.update_bias, 
                 requires_update,
@@ -218,18 +215,19 @@ class PCLayer(nn.Module):
             H_out = proj_layers["v_proj"].weight.shape[0] 
             self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
             
-            if self.use_lateral:
-                self.register_lateral(layer_type, H_in)
-                self.W_latents[layer_type] = self.W_latents[layer_type].to(device)
+            self.register_lateral(layer_type, H_in)
+            if layer_type in self.lateral_connections:
+                self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
         
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
             self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
             
-            if self.use_lateral:
-                self.register_lateral(layer_type, input_dim)  
-
+            self.register_lateral(layer_type, input_dim)  
+            if layer_type in self.lateral_connections:
+                self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
+    
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
         """Get the cached activity tensor for a given layer type."""
         return self._x_cache.get(layer_type, None)

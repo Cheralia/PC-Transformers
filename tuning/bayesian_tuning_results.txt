@@ -22,7 +22,6 @@ num_heads: 6
 n_blocks: 4
 batch_size: 8
 num_epochs: 3
-use_lateral: True
 energy_fn_name: mse
 eos_token_id: 0
 use_flash_attention: False

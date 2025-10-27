@@ -20,7 +20,6 @@ class GPTConfig:
         n_blocks (int): Number of transformer blocks.
         batch_size (int): Batch size for training/evaluation.
         num_epochs (int): Number of training epochs.
-        use_lateral (bool): Whether to use lateral (recurrent) connections.
         energy_fn_name (str): Name of the energy function to use for error computation.
         use_flash_attention (bool): Whether to use FlashAttention.
     """
@@ -38,7 +37,6 @@ class GPTConfig:
     n_blocks: int 
     batch_size: int
     num_epochs: int
-    use_lateral: bool
     internal_energy_fn_name:str
     output_energy_fn_name: str
     use_flash_attention: bool
