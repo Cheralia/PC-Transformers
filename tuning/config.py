@@ -35,7 +35,6 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         n_blocks=n_blocks,
         num_epochs=3,
         update_bias=update_bias,
-        use_lateral=True,
         internal_energy_fn_name="pc_e",
         output_energy_fn_name="pc_e",
         use_flash_attention=flash
@@ -46,7 +45,7 @@ def update_global_config(config):
     config_keys = [
         'num_heads', 'n_embed', 'block_size', 'n_blocks', 'vocab_size',
         'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
-        'update_bias', 'use_lateral', 'T', 
+        'update_bias', 'T', 
         'internal_energy_fn_name', 'output_energy_fn_name'
     ]
     
