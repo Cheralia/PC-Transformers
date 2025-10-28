@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 def get_dynamic_model_config(trial, vocab_size, flash=False):
     """Get model configuration with dynamic parameter combinations, including flash attention flag."""
-    n_embed = trial.suggest_int("n_embed", 64, 768, step=16)
+    n_embed = trial.suggest_int("n_embed", 64, 256, step=16)
 
     valid_heads = [h for h in range(4, min(16, n_embed // 12) + 1) if n_embed % h == 0 and 12 <= n_embed // h <= 128]
     if not valid_heads:
@@ -13,7 +13,7 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         return None
         
     num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
-    block_size = trial.suggest_int("block_size", 64, 512, step=16)
+    block_size = trial.suggest_int("block_size", 64, 256, step=16)
     n_blocks = trial.suggest_int('n_blocks', 1, 6)
     T = trial.suggest_int('T', 4, 20, log=True)
     dropout = trial.suggest_float("dropout", 0.05, 0.3)
@@ -21,6 +21,9 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     warmup_steps = trial.suggest_int('warmup_steps', 100, 500)
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
     scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
+    batch_size = 8
+    combined_internal_weight = 0.7
+    combined_output_weight = 0.3
     
     return GPTConfig(
         vocab_size=vocab_size,
@@ -33,10 +36,13 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         T=T,
         num_heads=num_heads,
         n_blocks=n_blocks,
-        num_epochs=3,
+        batch_size = batch_size,
+        num_epochs=5,
         update_bias=update_bias,
         internal_energy_fn_name="pc_e",
         output_energy_fn_name="pc_e",
+        combined_internal_weight = combined_internal_weight,
+        combined_output_weight = combined_output_weight,
         use_flash_attention=flash
     )
 
@@ -45,8 +51,7 @@ def update_global_config(config):
     config_keys = [
         'num_heads', 'n_embed', 'block_size', 'n_blocks', 'vocab_size',
         'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
-        'update_bias', 'T', 
-        'internal_energy_fn_name', 'output_energy_fn_name'
+        'update_bias', 'T', 'internal_energy_fn_name', 'output_energy_fn_name'
     ]
     
     for key in config_keys:
