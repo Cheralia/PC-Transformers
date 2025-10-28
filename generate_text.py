@@ -1,7 +1,7 @@
 import torch
-import os
+from tokenizers import Tokenizer
 from predictive_coding.config import GPTConfig
-from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids, compute_text_metrics
+from utils.model_utils import load_model, reset_pc_modules, decode_ids, compute_text_metrics
 from utils.config_utils import load_best_config
 import torch.nn.functional as F
 from data_preparation.dataloader import get_loaders
@@ -9,6 +9,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils.device_utils import setup_device
 import argparse
+from data_preparation.config import vocab_size
 
 """
 This script generates text using the trained predictive coding transformer model.
@@ -46,8 +47,6 @@ def text_generation(model, config, device = None,  max_samples=2):
     total_samples = 0
 
     _, _, test_loader = get_loaders(distributed=use_ddp)
-    tokenizer = load_tokenizer()
-    pad_token_id = tokenizer.pad_token_id
 
     for batch_idx, batch in enumerate(test_loader):
         input_ids = batch["input_ids"].to(device) 
@@ -61,9 +60,11 @@ def text_generation(model, config, device = None,  max_samples=2):
             generated_ids = generate_text(model, config, prompt_ids, max_new_tokens= 50, temperature=0.7, device = device)
 
             target_continuation = input_ids[i][prompt_len:]
-            target_continuation = target_continuation[target_continuation != pad_token_id].tolist()
+            target_continuation = target_continuation[target_continuation != 0].tolist()
 
             generated_continuation = generated_ids[prompt_len:].tolist()
+
+            tokenizer = Tokenizer.from_file("data_preparation/tokenizer.json")
 
             # Decode all
             prompt_str = decode_ids(tokenizer, prompt_ids.tolist())
@@ -97,15 +98,12 @@ def main():
         dist.init_process_group(backend="nccl")
 
     print(f"[Rank {local_rank}] Using device: {device}")
-    tokenizer = load_tokenizer()
-    vocab_size = len(tokenizer)
     
     best_config = load_best_config()
 
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size = best_config["block_size"],
-        la = 0.5,
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
         lr = best_config["peak_learning_rate"],
