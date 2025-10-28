@@ -158,7 +158,6 @@ def main():
         lr = 1e-5,
         peak_learning_rate = best_config["peak_learning_rate"],
         warmup_steps = best_config["warmup_steps"],
-        la = 0.5,
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
         T = best_config["T"],

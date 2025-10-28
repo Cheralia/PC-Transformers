@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 
 from utils.pc_utils import (
     x_init,
@@ -24,7 +24,6 @@ class PCLayer(nn.Module):
         energy_fn_name: str,
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
-        la: Optional[float] = None,
     ):
         super().__init__()
         self.T = T
@@ -34,7 +33,6 @@ class PCLayer(nn.Module):
         self.energy_fn_name = energy_fn_name 
         self.num_heads = num_heads
         self.n_embed = n_embed
-        self.la = la
         
         self.lateral_connections: Dict[str, LateralConnections] = {}
         
@@ -132,7 +130,6 @@ class PCLayer(nn.Module):
                 requires_update,
                 self.num_heads,
                 self.n_embed,
-                self.la, 
                 td_err=td_err, 
                 layer_norm=layer_norm,
                 flash=flash

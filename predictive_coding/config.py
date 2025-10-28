@@ -28,7 +28,6 @@ class GPTConfig:
     lr: float
     peak_learning_rate: Optional[float]
     warmup_steps: Optional[int] 
-    la: float
     n_embed: int 
     dropout: float 
     T: int 

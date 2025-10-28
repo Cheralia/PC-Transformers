@@ -126,7 +126,6 @@ def main():
         vocab_size = vocab_size,
         block_size = best_config["block_size"],
         lr = best_config["peak_learning_rate"],
-        la = 0.5,
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
         T = best_config["T"],
