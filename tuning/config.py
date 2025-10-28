@@ -5,39 +5,40 @@ logger = logging.getLogger(__name__)
 
 def get_dynamic_model_config(trial, vocab_size, flash=False):
     """Get model configuration with dynamic parameter combinations, including flash attention flag."""
-    n_embed = trial.suggest_int("n_embed", 64, 256, step=16)
+    n_embed = trial.suggest_int("n_embed", 64, 512, step=16)
 
-    valid_heads = [h for h in range(4, min(16, n_embed // 12) + 1) if n_embed % h == 0 and 12 <= n_embed // h <= 128]
+    valid_heads = [h for h in range(2, min(32, n_embed // 8) + 1) if n_embed % h == 0 and 8 <= n_embed // h <= 256]
     if not valid_heads:
         logger.warning(f"No valid heads for n_embed={n_embed}, forcing fallback.")
         return None
         
     num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
-    block_size = trial.suggest_int("block_size", 64, 256, step=16)
-    n_blocks = trial.suggest_int('n_blocks', 1, 6)
-    T = trial.suggest_int('T', 4, 20, log=True)
-    dropout = trial.suggest_float("dropout", 0.05, 0.3)
-    base_lr = trial.suggest_float('base_lr', 1e-5, 1e-3, log=True)
-    warmup_steps = trial.suggest_int('warmup_steps', 100, 500)
+    block_size = trial.suggest_int("block_size", 32, 512, step=16)
+    n_blocks = trial.suggest_int('n_blocks', 1, 12)
+    T = trial.suggest_int('T', 2, 50, log=True)
+    dropout = trial.suggest_float("dropout", 0.0, 0.5)
+    peak_lr = trial.suggest_float('peak_lr', 1e-5, 1e-2, log=True)
+    lr = peak_lr * 0.1 
+    warmup_steps = trial.suggest_int('warmup_steps', 50, 2000, log=True)
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
-    scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
-    batch_size = 8
-    combined_internal_weight = 0.7
-    combined_output_weight = 0.3
+    batch_size = trial.suggest_categorical('batch_size', [4, 8, 16, 32])
+    combined_internal_weight = trial.suggest_float('combined_internal_weight', 0.1, 0.9)
+    combined_output_weight = 1.0 - combined_internal_weight
+    num_epochs = trial.suggest_int('num_epochs', 3, 15)
     
     return GPTConfig(
         vocab_size=vocab_size,
         block_size=block_size,
-        peak_learning_rate=scaled_lr,
+        peak_learning_rate=peak_lr,
         warmup_steps=warmup_steps,
         n_embed=n_embed,
         dropout=dropout,
-        lr=1e-5, 
+        lr=lr, 
         T=T,
         num_heads=num_heads,
         n_blocks=n_blocks,
         batch_size = batch_size,
-        num_epochs=5,
+        num_epochs=num_epochs,
         update_bias=update_bias,
         internal_energy_fn_name="pc_e",
         output_energy_fn_name="pc_e",
@@ -51,7 +52,9 @@ def update_global_config(config):
     config_keys = [
         'num_heads', 'n_embed', 'block_size', 'n_blocks', 'vocab_size',
         'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
-        'update_bias', 'T', 'internal_energy_fn_name', 'output_energy_fn_name'
+        'update_bias', 'T', 'internal_energy_fn_name', 'output_energy_fn_name',
+        'batch_size', 'num_epochs', 'combined_internal_weight', 
+        'combined_output_weight'
     ]
     
     for key in config_keys:
