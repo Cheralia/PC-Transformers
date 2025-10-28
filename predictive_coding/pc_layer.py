@@ -137,7 +137,6 @@ class PCLayer(nn.Module):
                 self.energy_fn_name,
                 self.update_bias,
                 requires_update,
-                self,
                 self.num_heads,
                 self.n_embed,
                 self.la, 

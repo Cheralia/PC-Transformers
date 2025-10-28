@@ -8,43 +8,6 @@ from typing import Optional, Tuple, Any
 from torch.amp import autocast
 from contextlib import nullcontext
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
-
-def compute_DVL(attn_v, requires_update):
-    B, H, T, D = attn_v.shape
-    device = attn_v.device
-    
-    x = attn_v.transpose(0, 1).flatten(2, 3).transpose(0, 1)    # (B, H, T*D)
-    x = F.normalize(x, p=2, dim=-1)
-    s_m = torch.bmm(x, x.transpose(1, 2))  # (B, H, H)
-    s_m = s_m.mean(dim=0)  # (H, H)
-    identity = torch.eye(H, device=device)  
-    corr = s_m - identity  
-    dvl = (corr ** 2).mean()  
-    
-    dvl_grad = torch.zeros_like(attn_v, device=device)
-    if requires_update:
-        try:
-            dvl_grad = torch.autograd.grad(dvl, attn_v, retain_graph=True)[0]
-        except Exception as e:
-            warnings.warn(f"Error computing diversity gradient: {e}")
-            dvl_grad = torch.zeros_like(attn_v, device=device)
-    return dvl_grad
-
-def get_head_similarity(mu_heads):
-    """
-    Compute per-batch head similarity metric (absolute correlation mean per head).
-    Input mu_heads shape: (B, H, T, D)
-    Returns: tensor of shape (B,) containing mean head similarity per batch element.
-    """
-    B, H, T, D = mu_heads.shape
-    x = mu_heads.transpose(0, 1).flatten(2, 3)  # (H, B, T*D) 
-    x = F.normalize(x, p=2, dim=-1)
-    corr = torch.bmm(x, x.transpose(1, 2))   # (H, B, B)
-    # compute mean absolute off-diagonal similarity per head then mean across heads
-    mask = ~torch.eye(corr.size(1), device=corr.device).bool()
-    s_v = corr[:, mask].mean(dim= -1)
-    corr = s_v.abs().mean(dim=-1)  
-    return corr.detach().cpu()
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
@@ -198,7 +161,6 @@ def step_attn(
     energy_fn_name: str,
     update_bias: bool,
     requires_update: bool,
-    layer_instance: Optional[object],
     num_heads: int,
     n_embed: int,
     la: float,
@@ -211,12 +173,13 @@ def step_attn(
     - proj_layers must contain 'q_proj','k_proj','v_proj' modules
     """
     assert proj_layers is not None, "proj_layers dict is required for attention"
+
     device = x.device
     x=layer_norm(x) if layer_norm is not None else x
         
-    q_proj = proj_layers.get("q_proj")
-    k_proj = proj_layers.get("k_proj")
-    v_proj = proj_layers.get("v_proj")
+    q_proj = proj_layers["q_proj"]
+    k_proj = proj_layers["k_proj"]
+    v_proj = proj_layers["v_proj"]
     assert q_proj is not None and k_proj is not None and v_proj is not None, "Missing Q/K/V projections" 
         
     use_amp = target.is_cuda
@@ -244,29 +207,12 @@ def step_attn(
             mu_heads = apply_flash_attention(Q, K, V)
         else:
             mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
-
-        dvl_grad = compute_DVL(mu_heads, requires_update)
-        if dvl_grad is not None:
-            dvl_grad = dvl_grad.to(device)
             
-        similarity = get_head_similarity(mu_heads)
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
         bu_err = target - mu  # B, T, D
         error = bu_err - td_err if td_err is not None else bu_err  
-        
-        # incorporate diversity gradient projection if available
-        if dvl_grad is not None:
-            B, H, T, D = dvl_grad.shape              
-            dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, H*D) 
-            dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
-            error = error + la * dvl_projected
                 
-    if layer_instance is not None:
-        setattr(layer_instance, '_head_similarity', similarity)
-        setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
-        setattr(layer_instance, '_head_similarity_max', similarity.max().item())
-        
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, error)
         x = x + local_lr * delta_x
@@ -280,15 +226,36 @@ def step_attn(
 
     # PC update W_latent
     if requires_update:
-        for proj in (q_proj, k_proj, v_proj):
-            delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x.detach())
-            delta_W = torch.clamp(delta_W, -0.01, 0.01)
-            proj.weight.data.add_(delta_W)
-            if proj.bias is not None and update_bias:
-                delta_b = local_lr * bu_err.mean(dim=(0, 1))
-                delta_b = torch.clamp(delta_b, -0.01, 0.01)
-                delta_b = delta_b.view(-1)
-                proj.bias.data.add_(delta_b)
+        with torch.no_grad():
+            B, S = batch_size, seq_len
+
+            # Multi-head Q, K, V updates
+            for h in range(num_heads):
+                q_slice = Q[:, h, :, :]  # [B, S, head_dim]
+                k_slice = K[:, h, :, :]
+                v_slice = V[:, h, :, :]
+                
+                dW_q_h = torch.einsum("bsd,bse->de", q_slice, x) / (B * S)
+                dW_k_h = torch.einsum("bsd,bse->de", k_slice, x) / (B * S)
+                dW_v_h = torch.einsum("bsd,bse->de", v_slice, x) / (B * S)
+
+                start = h * head_dim
+                end = (h + 1) * head_dim
+                
+                q_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_q_h, -clamp_value, clamp_value)
+                k_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_k_h, -clamp_value, clamp_value)
+                v_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_v_h, -clamp_value, clamp_value)
+                
+                if update_bias:
+                    if q_proj.bias is not None:
+                        delta_b_q = (q_slice.mean(dim=(0, 1)) / (B * S))
+                        q_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_q, -clamp_value, clamp_value)
+                    if k_proj.bias is not None:
+                        delta_b_k = (k_slice.mean(dim=(0, 1)) / (B * S))
+                        k_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_k, -clamp_value, clamp_value)
+                    if v_proj.bias is not None:
+                        delta_b_v = (v_slice.mean(dim=(0, 1)) / (B * S))
+                        v_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_v, -clamp_value, clamp_value)
  
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type,energy_fn_name)
