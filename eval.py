@@ -50,10 +50,6 @@ def evaluate(model, dataloader, max_batches=None, device = None):
         input_ids = batch["input_ids"].to(device)
         targets = batch["target_ids"].to(device)
 
-        if local_rank == 0:
-            if (targets == 0).sum() == 0:
-                print(f"No pad tokens detected in batch {batch_idx + 1}, check padding behavior.")
-
         # Clip targets to valid range before using them for loss calculation
         if targets.max() >= vocab_size:
             targets = torch.clamp(targets, max=vocab_size-1)

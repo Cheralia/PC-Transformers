@@ -11,13 +11,6 @@ from utils.pc_utils import (
 )
 from predictive_coding.lateral_connc import LateralConnections
 
-def _device_of(params: nn.Module) -> torch.device:
-    """Return device of first parameter in module or CUDA if available otherwise CPU."""
-    params_list = list(params.parameters())
-    if params_list:
-        return params_list[0].device
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 class PCLayer(nn.Module):
     """
     Predictive Coding Layer wrapper that manages iterative inference state and
