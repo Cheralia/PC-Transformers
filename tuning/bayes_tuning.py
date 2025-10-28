@@ -2,10 +2,9 @@ import torch
 import logging
 import optuna
 import os
-import time
 import sys
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from data_preparation.dataloader import get_loaders
 from tuning.trial_objective import objective
 from tuning.tuning_logs import initialize_logs, write_final_results
 import torch.distributed as dist
@@ -102,10 +101,8 @@ if __name__ == "__main__":
     if use_ddp:
         dist.barrier(device_ids=[local_rank])
     
-   
     study = run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash)
 
- 
     if use_ddp and dist.is_initialized():
         dist.barrier(device_ids=[local_rank]) 
         dist.destroy_process_group()
