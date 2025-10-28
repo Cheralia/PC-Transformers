@@ -163,7 +163,6 @@ def step_attn(
     requires_update: bool,
     num_heads: int,
     n_embed: int,
-    la: float,
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module],
     flash: bool = False,
@@ -187,7 +186,6 @@ def step_attn(
         
     batch_size, seq_len, embed_dim = target.shape
     head_dim = n_embed // num_heads
-    la = la * math.sqrt(1.0 / head_dim)
 
     with autocast_ctx:      
         Q= q_proj(x)
