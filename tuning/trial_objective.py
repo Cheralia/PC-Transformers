@@ -36,10 +36,7 @@ def objective(trial, device = None, flash=False):
     
     print(f"\nStarting Trial {trial.number}")
     
-    try:
-       
-        local_rank, device, _ = setup_device()
-       
+    try:       
         if not dist.is_initialized() or dist.get_rank() == 0:
             config = get_dynamic_model_config(trial, vocab_size, flash)
             if config is None:
