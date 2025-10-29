@@ -170,7 +170,7 @@ def main():
         output_energy_fn_name="pc_e",
         combined_internal_weight=0.7,
         combined_output_weight=0.3,
-        use_flash_attention=True  
+        use_flash_attention=False  
     )
     
     # Create a separate logger for hyperparameters
