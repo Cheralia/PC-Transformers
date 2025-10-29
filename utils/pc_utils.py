@@ -36,8 +36,8 @@ def step_embed(
     word_layer: nn.Embedding = layer["word"]
     pos_layer: nn.Embedding = layer["pos"]
     
-    use_amp = target.is_cuda
-    autocast_ctx = autocast('cuda') if use_amp else nullcontext()
+    use_amp = False
+    autocast_ctx = nullcontext()
 
     # clip ids
     vocab_size = word_layer.weight.size(0)
@@ -98,16 +98,24 @@ def step_linear(
     Returns: (updated_x, mu, bu_err)
     """
     device = x.device
-    use_amp = target.is_cuda
-    autocast_ctx = autocast('cuda') if use_amp else nullcontext()
+    orig_dtype = x.dtype
+    
+    use_amp = target.is_cuda and orig_dtype == torch.float32
+    autocast_ctx = autocast('cuda', dtype = torch.float16) if use_amp else nullcontext()
     
     with autocast_ctx:
         if layer_norm is not None and layer_type == "fc1":
-           x = layer_norm(x)
+           x_input = layer_norm(x)
         elif layer_type == "fc2":
-           x = F.gelu(x)
+           x_input = F.gelu(x)
+        else:
+            x_input = x
            
-        mu = layer(x)
+        mu = layer(x_input)
+        
+        if use_amp and mu.dtype != orig_dtype:
+            mu = mu.to(orig_dtype)
+            
         if layer_type == "fc1":
             mu = F.gelu(mu)
         elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
@@ -135,7 +143,7 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x.detach())
+        delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
         delta_W = torch.clamp(delta_W, -0.01, 0.01)
         layer.weight.data.add_(delta_W)
         if layer.bias is not None and update_bias:
@@ -174,23 +182,30 @@ def step_attn(
     assert proj_layers is not None, "proj_layers dict is required for attention"
 
     device = x.device
-    x=layer_norm(x) if layer_norm is not None else x
+    orig_dtype = x.dtype
+    
+    x_norm=layer_norm(x) if layer_norm is not None else x
         
     q_proj = proj_layers["q_proj"]
     k_proj = proj_layers["k_proj"]
     v_proj = proj_layers["v_proj"]
     assert q_proj is not None and k_proj is not None and v_proj is not None, "Missing Q/K/V projections" 
         
-    use_amp = target.is_cuda
-    autocast_ctx = autocast('cuda') if use_amp else nullcontext()
+    use_amp = target.is_cuda and orig_dtype == torch.float32
+    autocast_ctx = autocast('cuda', dtype = torch.float16) if use_amp else nullcontext()
         
     batch_size, seq_len, embed_dim = target.shape
     head_dim = n_embed // num_heads
 
     with autocast_ctx:      
-        Q= q_proj(x)
-        K= k_proj(x)
-        V= v_proj(x)
+        Q= q_proj(x_norm)
+        K= k_proj(x_norm)
+        V= v_proj(x_norm)
+        
+        if use_amp:
+            Q = Q.to(orig_dtype)
+            K = K.to(orig_dtype)
+            V = V.to(orig_dtype)
             
         Q = Q.view(batch_size, num_heads, seq_len, head_dim)
         K = K.view(batch_size, num_heads, seq_len, head_dim)
@@ -205,6 +220,9 @@ def step_attn(
             mu_heads = apply_flash_attention(Q, K, V)
         else:
             mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
+        
+        if mu_heads.dtype != orig_dtype:
+            mu_heads = mu_heads.to(orig_dtype)
             
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
@@ -233,9 +251,9 @@ def step_attn(
                 k_slice = K[:, h, :, :]
                 v_slice = V[:, h, :, :]
                 
-                dW_q_h = torch.einsum("bsd,bse->de", q_slice, x) / (B * S)
-                dW_k_h = torch.einsum("bsd,bse->de", k_slice, x) / (B * S)
-                dW_v_h = torch.einsum("bsd,bse->de", v_slice, x) / (B * S)
+                dW_q_h = torch.einsum("bsd,bse->de", q_slice, x_norm) / (B * S)
+                dW_k_h = torch.einsum("bsd,bse->de", k_slice, x_norm) / (B * S)
+                dW_v_h = torch.einsum("bsd,bse->de", v_slice, x_norm) / (B * S)
 
                 start = h * head_dim
                 end = (h + 1) * head_dim
