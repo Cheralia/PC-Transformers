@@ -44,7 +44,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         except Exception as e:
             logger.warning(f"Study creation skipped because the file already exists: {e}")
     if dist.is_initialized():
-        dist.barrier(device_ids=[local_rank])
+        dist.barrier()
 
     study = optuna.load_study(
         study_name=study_name,
@@ -67,7 +67,10 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
                 trial = study.best_trial
                 logger.info(f"Best trial: {trial.number}. Best value: {trial.value:.5f}")
                 write_final_results(f"tuning/{study_name}_results.txt", trial)
-        dist.barrier(device_ids=[local_rank])  
+        
+        if dist.is_initialized():
+            dist.barrier()
+            
         return study
 
     
@@ -96,13 +99,13 @@ if __name__ == "__main__":
     
     if use_ddp and not dist.is_initialized():
         torch.cuda.set_device(local_rank)
-        dist.init_process_group(backend="nccl", rank=local_rank)
+        dist.init_process_group(backend="nccl")
 
     if use_ddp:
-        dist.barrier(device_ids=[local_rank])
+        dist.barrier()
     
     study = run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash)
 
     if use_ddp and dist.is_initialized():
-        dist.barrier(device_ids=[local_rank]) 
+        dist.barrier() 
         dist.destroy_process_group()

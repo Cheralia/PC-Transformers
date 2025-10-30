@@ -38,6 +38,7 @@ class GPTConfig:
     num_epochs: int
     internal_energy_fn_name:str
     output_energy_fn_name: str
-    use_flash_attention: bool
     combined_internal_weight: float 
     combined_output_weight: float
+    use_flash_attention: bool
+    alpha: float
