@@ -12,9 +12,16 @@ from tuning.config import get_dynamic_model_config, update_global_config
 from tuning.tuning_logs import log_trial_to_detailed_log
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from utils.device_utils import setup_device
+import torch.nn.functional as F
 from data_preparation.dataloader import get_loaders
 from data_preparation.config import vocab_size
+
+def combined_loss(energy, ce_loss, alpha=0.5):
+    """
+    Combine energy and cross-entropy loss.
+    alpha: weight between energy and CE loss (0.0 = only CE, 1.0 = only energy)
+    """
+    return alpha * energy + (1 - alpha) * ce_loss
 
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
@@ -70,11 +77,19 @@ def objective(trial, device = None, flash=False):
 
         model.eval()
         avg_energy, avg_perplexity = evaluate(model, valid_loader, max_batches=None, device=device)
+        ce_loss = torch.log(torch.tensor(avg_perplexity)).item()
+        
+        alpha = getattr(config, 'alpha', 0.5)
+        combined_objective = combined_loss(avg_energy, ce_loss, alpha=alpha)
         
         trial_time = (time.time() - start_time) 
         
         trial.set_user_attr("config", config.__dict__)
         trial.set_user_attr("energy", avg_energy)
+        trial.set_user_attr("perplexity", avg_perplexity)
+        trial.set_user_attr("ce_loss", ce_loss)
+        trial.set_user_attr("combined_loss", combined_objective)
+        trial.set_user_attr("alpha", alpha)
         trial.set_user_attr("trial_time", trial_time)
 
         trial_path = "tuning/bayesian_tuning_trials.txt"
@@ -83,11 +98,13 @@ def objective(trial, device = None, flash=False):
             write_header = trial.number == 0 
             log_trial_to_detailed_log(trial_path, trial, config, trial_time, avg_energy, write_header=write_header)
 
-        return avg_energy
+        return combined_objective
     
     except Exception as e:
         print("Trial failed:", e)
         trial.set_user_attr("energy", "N/A")
+        trial.set_user_attr("perplexity", "N/A")
+        trial.set_user_attr("combined_loss", "N/A")
         trial.set_user_attr("trial_time", (time.time() - start_time))
 
         return float("inf")
