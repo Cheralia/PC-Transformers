@@ -174,9 +174,12 @@ def step_attn(
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module],
     flash: bool = False,
+    kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    use_cache: bool = False,
     ):
     """
-    Predictive coding step for attention. Returns (updated_x, mu, bu_err).
+    Predictive coding step for attention with KV caching support.
+    Returns (updated_x, mu, bu_err).
     - proj_layers must contain 'q_proj','k_proj','v_proj' modules
     """
     assert proj_layers is not None, "proj_layers dict is required for attention"
@@ -199,20 +202,33 @@ def step_attn(
 
     with autocast_ctx:      
         Q= q_proj(x_norm)
-        K= k_proj(x_norm)
-        V= v_proj(x_norm)
+        
+        # KV Cache logic: only compute K,V for new tokens if cache exists
+        if use_cache and kv_cache is not None:
+            K_new = k_proj(x_norm)
+            V_new = v_proj(x_norm)
+            
+            K_cached, V_cached = kv_cache
+            K = torch.cat([K_cached, K_new], dim=1)
+            V = torch.cat([V_cached, V_new], dim=1)
+        else:
+            # Compute full K, V
+            K = k_proj(x_norm)
+            V = v_proj(x_norm)
         
         if use_amp:
             Q = Q.to(orig_dtype)
             K = K.to(orig_dtype)
             V = V.to(orig_dtype)
-            
+        
+        new_kv_cache = (K.detach(), V.detach()) if use_cache else None
         Q = Q.view(batch_size, num_heads, seq_len, head_dim)
-        K = K.view(batch_size, num_heads, seq_len, head_dim)
-        V = V.view(batch_size, num_heads, seq_len, head_dim)
+        K = K.view(batch_size, num_heads, -1, head_dim)
+        V = V.view(batch_size, num_heads, -1, head_dim)
             
         #create causal mask (1=keep, 0=mask)
-        causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=device)).unsqueeze(0).unsqueeze(0)
+        kv_len = K.size(2)
+        causal_mask = torch.tril(torch.ones(seq_len, kv_len, device=device)).unsqueeze(0).unsqueeze(0)
 
         # !! Causal Mask
         if flash:
@@ -245,11 +261,14 @@ def step_attn(
         with torch.no_grad():
             B, S = batch_size, seq_len
 
+            K_update = K[:, :, -seq_len:, :] 
+            V_update = V[:, :, -seq_len:, :]
+            
             # Multi-head Q, K, V updates
             for h in range(num_heads):
                 q_slice = Q[:, h, :, :]  # [B, S, head_dim]
-                k_slice = K[:, h, :, :]
-                v_slice = V[:, h, :, :]
+                k_slice = K_update[:, h, :, :]
+                v_slice = V_update[:, h, :, :]
                 
                 dW_q_h = torch.einsum("bsd,bse->de", q_slice, x_norm) / (B * S)
                 dW_k_h = torch.einsum("bsd,bse->de", k_slice, x_norm) / (B * S)
@@ -276,7 +295,7 @@ def step_attn(
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type,energy_fn_name)
      
-    return x, mu, bu_err
+    return x, mu, bu_err, new_kv_cache
     
 ENERGY_FUNCTIONS = {
     "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,    

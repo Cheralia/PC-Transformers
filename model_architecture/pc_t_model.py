@@ -40,7 +40,7 @@ class PCTransformer(nn.Module):
                     if module.W_latents[key] is not None:
                         module.W_latents[key] = module.W_latents[key].to(next(self.parameters()).device)
 
-    def forward(self, target_ids, input_ids):
+    def forward(self, target_ids, input_ids, use_kv_cache=False):
         """
         Forward pass of the PCTransformer model, using device-specific parallelism (CUDA streams or torch.jit.fork).
 
@@ -261,9 +261,14 @@ class PCTransformer(nn.Module):
                     input_ids=None,
                     position_ids=None,
                     flash=getattr(self.config, 'use_flash_attention', False),
-
+                    use_cache=use_kv_cache,  
+                    kv_cache=block.attn.kv_cache if use_kv_cache else None, 
                 )
 
+                # Update cache after last iteration
+                if use_kv_cache and t == self.config.T - 1:
+                    block.attn.kv_cache = block.attn.pc_qkv._last_kv_cache
+    
             # Execute embedding layer
             execute_parallel(
                 use_cuda,

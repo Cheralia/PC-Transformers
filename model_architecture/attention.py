@@ -5,6 +5,7 @@ class Attention(nn.Module):
     """
     Multi-head self-attention module with predictive coding layers for use in transformer architectures.
     Computes attention scores, applies masking, and outputs context vectors.
+    Includes KV caching for efficient generation.
     """
     def __init__(self, config):
         super().__init__()
@@ -34,3 +35,10 @@ class Attention(nn.Module):
             update_bias = config.update_bias,
             energy_fn_name=config.internal_energy_fn_name,
         )
+        
+        # KV cache for generation: stores (K, V) tensors
+        self.kv_cache = None
+        
+    def clear_kv_cache(self):
+        """Clear the KV cache"""
+        self.kv_cache = None

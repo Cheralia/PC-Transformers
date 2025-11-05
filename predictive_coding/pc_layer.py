@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 
 from utils.pc_utils import (
     x_init,
@@ -70,6 +70,8 @@ class PCLayer(nn.Module):
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
         flash: bool = False,
+        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # ADD THIS
+        use_cache: bool = False, 
     ):
         """Perform one predictive coding inference step."""
         self._reset_step_state()
@@ -115,7 +117,7 @@ class PCLayer(nn.Module):
         
         elif layer_type == "attn":
             lateral_conn = self.lateral_connections.get(layer_type, None)
-            x, mu, bu_err = step_attn(
+            x, mu, bu_err, new_kv_cache = step_attn(
                 t,
                 T,
                 target_activity,
@@ -132,8 +134,14 @@ class PCLayer(nn.Module):
                 self.n_embed,
                 td_err=td_err, 
                 layer_norm=layer_norm,
-                flash=flash
+                flash=flash, 
+                kv_cache=kv_cache,  
+                use_cache=use_cache,
             )
+            # Store cache for retrieval
+            if use_cache:
+                self._last_kv_cache = new_kv_cache
+        
         else:
             lateral_conn = self.lateral_connections.get(layer_type, None)
             x, mu, bu_err = step_linear(

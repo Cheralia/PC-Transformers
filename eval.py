@@ -126,6 +126,8 @@ def main():
         vocab_size = vocab_size,
         block_size = best_config["block_size"],
         lr = best_config["peak_learning_rate"],
+        peak_learning_rate = best_config["peak_learning_rate"],
+        warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
         T = best_config["T"],
@@ -133,11 +135,13 @@ def main():
         n_blocks = best_config["n_blocks"],
         batch_size = 8,
         num_epochs = 1,
+        update_bias = best_config["update_bias"],
         internal_energy_fn_name="pc_e",
         output_energy_fn_name="pc_e",
-        combined_internal_weight=0.3,
-        combined_output_weight=0.7,
-        update_bias = best_config["update_bias"]        
+        combined_internal_weight=0.7,
+        combined_output_weight=0.3,
+        use_flash_attention=False,
+        alpha = best_config["alpha"]    
     )
   
     model_path = "checkpoints/final_model.pt"
