@@ -56,7 +56,7 @@ def update_global_config(config):
         'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
         'update_bias', 'T', 'internal_energy_fn_name', 'output_energy_fn_name',
         'batch_size', 'num_epochs', 'combined_internal_weight', 
-        'combined_output_weight'
+        'combined_output_weight', 'alpha'
     ]
     
     for key in config_keys:

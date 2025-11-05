@@ -170,7 +170,8 @@ def main():
         output_energy_fn_name="pc_e",
         combined_internal_weight=0.7,
         combined_output_weight=0.3,
-        use_flash_attention=False  
+        use_flash_attention=False,
+        alpha = best_config["alpha"]
     )
     
     # Create a separate logger for hyperparameters
