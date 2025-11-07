@@ -7,15 +7,15 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     """Get model configuration with dynamic parameter combinations, including flash attention flag."""
     n_embed = trial.suggest_int("n_embed", 64, 512, step=16)
 
-    valid_heads = [h for h in range(2, min(32, n_embed // 8) + 1) if n_embed % h == 0 and 8 <= n_embed // h <= 256]
+    valid_heads = [h for h in range(2, min(32, n_embed // 8) + 1) if n_embed % h == 0 and 8 <= n_embed // h <= 128]
     if not valid_heads:
         logger.warning(f"No valid heads for n_embed={n_embed}, forcing fallback.")
         return None
         
     num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
-    block_size = trial.suggest_int("block_size", 32, 512, step=16)
+    block_size = trial.suggest_int("block_size", 64, 512, step=16)
     n_blocks = trial.suggest_int('n_blocks', 1, 12)
-    T = trial.suggest_int('T', 2, 50, log=True)
+    T = trial.suggest_int('T', 2, 14, log=True)
     dropout = trial.suggest_float("dropout", 0.0, 0.5)
     peak_lr = trial.suggest_float('peak_lr', 1e-5, 1e-2, log=True)
     lr = peak_lr * 0.1 
@@ -24,8 +24,8 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     batch_size = trial.suggest_categorical('batch_size', [4, 8, 16, 32])
     combined_internal_weight = trial.suggest_float('combined_internal_weight', 0.1, 0.9)
     combined_output_weight = 1.0 - combined_internal_weight
-    num_epochs = trial.suggest_int('num_epochs', 3, 15)
-    alpha = trial.suggest_float('alpha', 0.0, 1.0)
+    num_epochs = num_epochs = 10
+    alpha = 0.5
     
     return GPTConfig(
         vocab_size=vocab_size,

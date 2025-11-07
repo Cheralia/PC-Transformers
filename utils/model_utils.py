@@ -8,23 +8,6 @@ def load_model(model_path, config):
     model.load_state_dict(torch.load(model_path, weights_only=True), strict = False)
     return model
 
-def reset_pc_modules(model):
-    """
-    Reset predictive coding modules in the model by clearing errors and energy.
-
-    Args:
-        model: The model containing predictive coding modules.
-    """
-    for module in model.modules():
-        if hasattr(module, "clear_errors"):
-            module.clear_errors()
-        if hasattr(module, "clear_energy"):
-            module.clear_energy()
-        if hasattr(module, "_x_cache"):
-            module._x_cache = {}
-        if hasattr(module, "_embed_cache"):
-            module._embed_cache = {"mu_word": None, "mu_pos": None, "step": -1}
-
 def compute_text_metrics(predictions, targets):
     print("\nComputing BERTScore and BLEU...")
     P, R, F1 = bertscore(

@@ -7,7 +7,7 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from data_preparation.dataloader import get_loaders
 import torch.nn.functional as F
-from utils.model_utils import load_model, reset_pc_modules
+from utils.model_utils import load_model
 from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -91,11 +91,9 @@ def evaluate(model, dataloader, max_batches=None, device = None):
         total_energy += batch_energy
         batch_count += 1
 
+        perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
         if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f}")
-        
-        reset_pc_modules(model)
-        cleanup_memory()
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
    
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0

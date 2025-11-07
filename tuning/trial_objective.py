@@ -7,7 +7,6 @@ from eval import evaluate
 from utils.pc_utils import cleanup_memory
 from model_architecture.pc_t_model import PCTransformer
 from predictive_coding.config import GPTConfig
-from utils.model_utils import reset_pc_modules
 from tuning.config import get_dynamic_model_config, update_global_config
 from tuning.tuning_logs import log_trial_to_detailed_log
 import torch.distributed as dist
@@ -72,22 +71,22 @@ def objective(trial, device = None, flash=False):
             return float("inf")
 
         model.train()
-        train(model, train_loader, config, global_step = 0, device = device, logger=None)
-        reset_pc_modules(model)
+        train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=None)
 
         model.eval()
         avg_energy, avg_perplexity = evaluate(model, valid_loader, max_batches=None, device=device)
-        ce_loss = torch.log(torch.tensor(avg_perplexity)).item()
         
-        alpha = getattr(config, 'alpha', 0.5)
-        combined_objective = combined_loss(avg_energy, ce_loss, alpha=alpha)
+        train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
+        
+        alpha = 0.5
+        combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha)
         
         trial_time = (time.time() - start_time) 
         
         trial.set_user_attr("config", config.__dict__)
-        trial.set_user_attr("energy", avg_energy)
-        trial.set_user_attr("perplexity", avg_perplexity)
-        trial.set_user_attr("ce_loss", ce_loss)
+        trial.set_user_attr("energy", train_energy)
+        trial.set_user_attr("perplexity", train_perplexity)
+        trial.set_user_attr("ce_loss", train_ce_loss)
         trial.set_user_attr("combined_loss", combined_objective)
         trial.set_user_attr("alpha", alpha)
         trial.set_user_attr("trial_time", trial_time)
@@ -96,7 +95,7 @@ def objective(trial, device = None, flash=False):
 
         if not dist.is_initialized() or dist.get_rank() == 0:
             write_header = trial.number == 0 
-            log_trial_to_detailed_log(trial_path, trial, config, trial_time, avg_energy, write_header=write_header)
+            log_trial_to_detailed_log(trial_path, trial, config, trial_time, train_energy, write_header=write_header)
 
         return combined_objective
     
@@ -111,6 +110,5 @@ def objective(trial, device = None, flash=False):
     
     finally:
         if model:
-            reset_pc_modules(model)
             del model
         cleanup_memory()

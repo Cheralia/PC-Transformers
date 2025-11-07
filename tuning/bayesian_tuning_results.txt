@@ -1,27 +1,28 @@
 COMBINED ENERGY OPTIMIZATION RESULTS
 ====================================
 
-Best combined energy: 8.2924
-CE Loss: 8.2904
-Raw Energy: 0.0020
-Normalized Energy: 0.0020
-Combined Energy: 8.2924
+Best combined energy: 3.6744
+Average Energy: 1.6659
+Average Perplexity: 293.7770
+Combined Loss: 3.6744
 
 Best Configuration:
-vocab_size: 4000
-block_size: 448
-peak_learning_rate: 5e-4
-warmup_steps: 217
-la: 0.5
-n_embed: 12
-dropout: 0.24684719512514441
-lr: 1e-5
-T: 10
+vocab_size: 1024
+block_size: 64
+lr: 0.0009606017304857476
+peak_learning_rate: 0.009606017304857476
+warmup_steps: 59
+n_embed: 512
+dropout: 0.46876145412214615
+T: 2
 update_bias: False
-num_heads: 6
-n_blocks: 4
+num_heads: 32
+n_blocks: 12
 batch_size: 8
-num_epochs: 3
-energy_fn_name: mse
-eos_token_id: 0
+num_epochs: 10
+internal_energy_fn_name: pc_e
+output_energy_fn_name: pc_e
+combined_internal_weight: 0.8779955579743048
+combined_output_weight: 0.12200444202569516
 use_flash_attention: False
+alpha: 0.5

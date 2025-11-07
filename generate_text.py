@@ -1,7 +1,7 @@
 import torch
 from tokenizers import Tokenizer
 from predictive_coding.config import GPTConfig
-from utils.model_utils import load_model, reset_pc_modules, decode_ids, compute_text_metrics
+from utils.model_utils import load_model, decode_ids, compute_text_metrics
 from utils.config_utils import load_best_config
 import torch.nn.functional as F
 from data_preparation.dataloader import get_loaders
@@ -52,17 +52,8 @@ def generate_text(model, config, input_ids, max_new_tokens, temperature, device 
         generated_tokens.append(next_token.item())
         input_tensor = torch.cat((input_tensor, next_token), dim=1)
         
-        if not use_cache:
-            reset_pc_modules(model)
         if next_token.item() == getattr(config, 'eos_token_id', None):
             break
-    
-    # Reset PC modules and clear cache after generation
-    reset_pc_modules(model)
-    if use_cache:
-        for module in model.modules():
-            if hasattr(module, 'clear_kv_cache'):
-                module.clear_kv_cache()   
                       
     return input_tensor[0] 
 

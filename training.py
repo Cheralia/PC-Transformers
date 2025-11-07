@@ -9,7 +9,6 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from data_preparation.dataloader import get_loaders
-from utils.model_utils import reset_pc_modules
 from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
 from eval import evaluate
@@ -111,10 +110,6 @@ def train(model, dataloader, config, global_step, device, logger):
                 logger.info(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
             else:
                 print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
-
-        reset_pc_modules(model)
-        cleanup_memory()
-    
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
