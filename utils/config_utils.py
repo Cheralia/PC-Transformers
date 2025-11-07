@@ -16,16 +16,24 @@ def load_best_config():
     }
 
     fallback_values = {
-        "block_size": 352,
-        "peak_learning_rate": 0.0006870706728235172,
-        "warmup_steps": 211,
+        "block_size": 64,
+        "peak_learning_rate": 0.009606017304857476,
+        "warmup_steps": 59,
         "n_embed": 512,
-        "dropout": 0.11081845099183116,
-        "T": 15,
-        "num_heads": 8,
-        "n_blocks": 4,
+        "dropout": 0.46876145412214615,
+        "T": 2,
+        "num_heads": 32,
+        "n_blocks": 12,
         "update_bias": False,
-        "alpha": 0.5
+        "alpha": 0.5,
+        "lr": 0.0009606017304857476,
+        "batch_size": 8,
+        "num_epochs": 10,
+        "internal_energy_fn_name": "pc_e",
+        "output_energy_fn_name": "pc_e",
+        "combined_internal_weight": 0.8779955579743048,
+        "combined_output_weight": 0.12200444202569516,
+        "use_flash_attention": False
     }
 
     config = {}
