@@ -1,3 +1,6 @@
+import logging
+import os
+
 def initialize_logs(study_name: str):
     """Create and initialize summary and trial log files."""
     trials_path = f"tuning/{study_name}_trials.txt"
@@ -43,3 +46,24 @@ def write_final_results(results_path, trial):
             f.write("Best Configuration:\n")
             for key, val in config.items():
                 f.write(f"{key}: {val}\n")
+
+def get_trial_logger(trial_number: int, log_dir: str = "logs") -> logging.Logger:
+    """
+    Returns a logger that prepends trial and epoch info to every message.
+    
+    Args:
+        trial_number: Current trial number
+        log_dir: Directory where batch logs will be saved
+    """
+    os.makedirs(log_dir, exist_ok=True)
+    
+    base_logger = logging.getLogger(f"trial_{trial_number}")
+    base_logger.setLevel(logging.INFO)
+    
+    if not base_logger.handlers:
+        fh = logging.FileHandler(os.path.join(log_dir, "batch_debug.log"), mode="a")
+        fmt = logging.Formatter(f"[Trial {trial_number} | %(asctime)s - %(levelname)s - %(message)s")
+        fh.setFormatter(fmt)
+        base_logger.addHandler(fh)
+    
+    return base_logger
