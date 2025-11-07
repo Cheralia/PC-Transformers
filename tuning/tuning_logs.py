@@ -47,7 +47,7 @@ def write_final_results(results_path, trial):
             for key, val in config.items():
                 f.write(f"{key}: {val}\n")
 
-def get_trial_logger(trial_number: int, log_dir: str = "logs") -> logging.Logger:
+def trial_batch_logger(trial_number: int, log_dir: str = "logs") -> logging.Logger:
     """
     Returns a logger that prepends trial and epoch info to every message.
     
