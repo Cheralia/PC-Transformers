@@ -150,7 +150,7 @@ def main():
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size = best_config["block_size"],
-        lr = 1e-5,
+        lr = best_config["lr"],
         peak_learning_rate = best_config["peak_learning_rate"],
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
@@ -158,14 +158,14 @@ def main():
         T = best_config["T"],
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
-        batch_size = 8,
-        num_epochs = 20, 
+        batch_size = best_config["batch_size"],
+        num_epochs = best_config["num_epochs"], 
         update_bias = best_config["update_bias"],
-        internal_energy_fn_name="pc_e",
-        output_energy_fn_name="pc_e",
-        combined_internal_weight=0.7,
-        combined_output_weight=0.3,
-        use_flash_attention=False,
+        internal_energy_fn_name=best_config["internal_energy_fn_name"],
+        output_energy_fn_name=best_config["output_energy_fn_name"],
+        combined_internal_weight=best_config["combined_internal_weight"],
+        combined_output_weight=best_config["combined_output_weight"],
+        use_flash_attention=best_config["use_flash_attention"],
         alpha = best_config["alpha"]
     )
     
