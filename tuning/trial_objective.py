@@ -8,7 +8,7 @@ from utils.pc_utils import cleanup_memory
 from model_architecture.pc_t_model import PCTransformer
 from predictive_coding.config import GPTConfig
 from tuning.config import get_dynamic_model_config, update_global_config
-from tuning.tuning_logs import log_trial_to_detailed_log
+from tuning.tuning_logs import log_trial_to_detailed_log, trial_batch_logger
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.nn.functional as F
@@ -35,7 +35,7 @@ def broadcast_config(config_dict, device):
     dist.broadcast(obj_tensor, src=0)
     return pickle.loads(bytes(obj_tensor.tolist()))
 
-def objective(trial, device = None, flash=False):
+def objective(trial, device = None, flash=False, enable_batch_logging=False):
     """Bayesian Objective function"""
     start_time = time.time()
     model = None
@@ -70,8 +70,10 @@ def objective(trial, device = None, flash=False):
         if len(train_loader) == 0 or len(valid_loader) == 0:
             return float("inf")
 
+        trial_logger = trial_batch_logger(trial_number=trial.number) if enable_batch_logging else None
+
         model.train()
-        train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=None)
+        train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
 
         model.eval()
         avg_energy, avg_perplexity = evaluate(model, valid_loader, max_batches=None, device=device)

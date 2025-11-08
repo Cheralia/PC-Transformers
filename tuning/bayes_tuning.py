@@ -24,7 +24,7 @@ Usage:  torchrun --nproc-per-node=<NUM_GPU> tuning/bayes_tuning.py
 
 """
 
-def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False):
+def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False, enable_batch_logging=False):
     """Run clean dynamic hyperparameter tuning"""
     storage_url = f"sqlite:///tuning/{study_name}.db"
     if local_rank == 0:
@@ -68,7 +68,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
             logger.info(f"\nBest trial so far: {best_trial.number} | Combined Loss: {combined_loss:.5f} | Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f}\n")
 
     try:
-        study.optimize(lambda trial: objective(trial, device, flash), n_trials=n_trials,  callbacks=[callback], show_progress_bar=(local_rank == 0))
+        study.optimize(lambda trial: objective(trial, device, flash, enable_batch_logging=enable_batch_logging), n_trials=n_trials,  callbacks=[callback], show_progress_bar=(local_rank == 0))
         logger.info(f"[Rank {local_rank}] Bayesian tuning completed!")
     
         if local_rank == 0 and study.best_trial:
@@ -92,6 +92,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Bayesian Hyperparameter Tuning with Predictive Coding Transformer")
     parser.add_argument('--flash', '--flash_attention', action='store_true', help='Enable FlashAttention for attention layers')
+    parser.add_argument('--log_batches', action='store_true', help='Enable batch-level logging during tuning')
     args = parser.parse_args()
     
     rank = int(os.environ.get("RANK", 0))
@@ -115,7 +116,7 @@ if __name__ == "__main__":
     if use_ddp:
         dist.barrier()
     
-    study = run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash)
+    study = run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash, enable_batch_logging=args.log_batches)
 
     if use_ddp and dist.is_initialized():
         dist.barrier() 
