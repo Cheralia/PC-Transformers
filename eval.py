@@ -134,12 +134,12 @@ def main():
         batch_size = 8,
         num_epochs = 1,
         update_bias = best_config["update_bias"],
-        internal_energy_fn_name="pc_e",
-        output_energy_fn_name="pc_e",
-        combined_internal_weight=0.7,
-        combined_output_weight=0.3,
-        use_flash_attention=False,
-        alpha = best_config["alpha"]    
+        internal_energy_fn_name=best_config["internal_energy_fn_name"],
+        output_energy_fn_name=best_config["output_energy_fn_name"],
+        combined_internal_weight=best_config["combined_internal_weight"],
+        combined_output_weight=best_config["combined_output_weight"],
+        use_flash_attention=best_config["use_flash_attention"],
+        alpha = best_config["alpha"]
     )
   
     model_path = "checkpoints/final_model.pt"
@@ -151,7 +151,9 @@ def main():
 
     # Max batches can be set to limit evaluation, or None for full dataset
     start_time = time.time()
-    evaluate(model, test_loader, max_batches= None, device=device)
+    with torch.no_grad(): 
+        evaluate(model, test_loader, max_batches= None, device=device)
+        
     elapsed = time.time() - start_time
     if not dist.is_initialized() or dist.get_rank() == 0:
         print(f"Evaluation completed in {elapsed:.2f} seconds")  

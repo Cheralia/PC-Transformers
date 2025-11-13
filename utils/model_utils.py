@@ -5,7 +5,17 @@ from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
 
 def load_model(model_path, config):
     model = PCTransformer(config)
-    model.load_state_dict(torch.load(model_path, weights_only=True), strict = False)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+    checkpoint = torch.load(model_path, map_location=device, weights_only=True)
+    
+    if 'model_state' in checkpoint:
+        state_dict = checkpoint['model_state']
+    else:
+        state_dict = checkpoint
+        
+    model.load_state_dict(state_dict, strict=True)
+    print(f"Model loaded successfully from {model_path}")
     return model
 
 def compute_text_metrics(predictions, targets):
