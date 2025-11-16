@@ -14,7 +14,7 @@ def load_model(model_path, config):
     else:
         state_dict = checkpoint
         
-    model.load_state_dict(state_dict, strict=True)
+    model.load_state_dict(state_dict, strict=False)
     print(f"Model loaded successfully from {model_path}")
     return model
 

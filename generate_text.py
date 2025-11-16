@@ -23,7 +23,12 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> generate_text.py
 local_rank, device, use_ddp = setup_device()
 def generate_text(model, config, input_ids, max_new_tokens, temperature, device = None, use_cache=True):
     model.eval()
-    input_tensor = input_ids.unsqueeze(0).to(device)
+    
+    if input_ids is None:
+        start_token = getattr(config, "start_token_id", 0)  
+        input_tensor = torch.tensor([start_token], device=device).unsqueeze(0)
+    else:
+        input_tensor = input_ids.unsqueeze(0).to(device)
 
     # Clear KV cache at the start
     if use_cache:
@@ -34,15 +39,8 @@ def generate_text(model, config, input_ids, max_new_tokens, temperature, device 
     generated_tokens = []
     
     for step in range(max_new_tokens):
-        # For first token or without cache, use full sequence
-        # For subsequent tokens with cache, only pass the last token
-        if use_cache and step > 0:
-            current_input = input_tensor[:, -1:]  
-        else:
-            current_input = input_tensor
-            
-        if current_input.size(1) > config.block_size:
-            current_input = current_input[:, -config.block_size:]
+        # For first token or with cache, pass full or last token
+        current_input = input_tensor[:, -config.block_size:] if input_tensor.size(1) > config.block_size else input_tensor
       
         logits = model(current_input, current_input, use_kv_cache=use_cache)
         logits = logits[:, -1, :] / temperature
@@ -57,54 +55,21 @@ def generate_text(model, config, input_ids, max_new_tokens, temperature, device 
                       
     return input_tensor[0] 
 
-def text_generation(model, config, device = None,  max_samples=2, use_cache = True):
-    decoded_preds, decoded_targets = [], []
-    prompt_len = 5
-    total_samples = 0
+def text_generation(model, config, device = None,  max_samples=2, max_new_tokens=200, use_cache = True):
+    decoded_preds = []
 
-    _, _, test_loader = get_loaders(distributed=use_ddp)
+    tokenizer = Tokenizer.from_file("data_preparation/tokenizer.json")
+    
+    for sample_idx in range(max_samples):
+        generated_ids = generate_text(model, config, input_ids=None, max_new_tokens=max_new_tokens, temperature=0.7, device=device, use_cache=use_cache)
+        generated_str = decode_ids(tokenizer, generated_ids.tolist(), stop_at_eos=True)
 
-    for batch_idx, batch in enumerate(test_loader):
-        input_ids = batch["input_ids"].to(device) 
-        batch_size = input_ids.size(0)
+        print(f"\n[Sample {sample_idx + 1}]")
+        print(f"[GENERATED]: {generated_str}")
 
-        for i in range(batch_size):
-            if total_samples >= max_samples:
-                break
+        decoded_preds.append(generated_str)
 
-            prompt_ids = input_ids[i][:prompt_len]
-            generated_ids = generate_text(model, config, prompt_ids, max_new_tokens= 50, temperature=0.7, device = device, use_cache = use_cache)
-
-            target_continuation = input_ids[i][prompt_len:]
-            target_continuation = target_continuation[target_continuation != 0].tolist()
-
-            generated_continuation = generated_ids[prompt_len:].tolist()
-
-            tokenizer = Tokenizer.from_file("data_preparation/tokenizer.json")
-
-            # Decode all
-            prompt_str = decode_ids(tokenizer, prompt_ids.tolist())
-            target_str = decode_ids(tokenizer, target_continuation, stop_at_eos=True)
-            generated_str = decode_ids(tokenizer, generated_continuation, stop_at_eos=True)
-
-            decoded_preds.append(generated_str)
-            decoded_targets.append(target_str)
-
-            
-            if not dist.is_initialized() or dist.get_rank() == 0:
-                print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
-                print(f"[PROMPT ]: {prompt_str}")
-                print(f"[TARGET ]: {target_str}")
-                print(f"[PREDICT]: {generated_str}")
-                if use_cache:
-                    print("[Using KV Cache]")
-            
-            total_samples += 1
-
-        if total_samples >= max_samples:
-            break
-
-    return decoded_preds, decoded_targets
+    return decoded_preds
 
 def main():
    
@@ -149,8 +114,8 @@ def main():
 
     if not dist.is_initialized() or dist.get_rank() == 0:
         decoded_preds, decoded_targets = text_generation(model, config, device, max_samples=2, use_cache=True)
-        if decoded_preds and decoded_targets and local_rank == 0:
-            compute_text_metrics(decoded_preds, decoded_targets)
+        # if decoded_preds and decoded_targets and local_rank == 0:
+        #     compute_text_metrics(decoded_preds, decoded_targets)
     
     if use_ddp and dist.is_initialized():
         dist.barrier()
