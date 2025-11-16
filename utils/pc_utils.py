@@ -5,7 +5,6 @@ import math
 import warnings
 import gc
 from typing import Optional, Tuple, Any
-from torch.amp import autocast
 from contextlib import nullcontext
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
     
@@ -36,9 +35,6 @@ def step_embed(
     word_layer: nn.Embedding = layer["word"]
     pos_layer: nn.Embedding = layer["pos"]
     
-    use_amp = False
-    autocast_ctx = nullcontext()
-
     # clip ids
     vocab_size = word_layer.weight.size(0)
     if input_ids.max() >= vocab_size:
@@ -47,18 +43,18 @@ def step_embed(
     if position_ids.max() >= max_pos:
         position_ids = torch.clamp(position_ids, max=max_pos-1)
         
-    with autocast_ctx:
-        if requires_update or mu_word_cache is None or mu_pos_cache is None:
-            mu_word = word_layer(input_ids)
-            mu_pos = pos_layer(position_ids)
-        else:
-            mu_word = mu_word_cache
-            mu_pos = mu_pos_cache
-            
-        mu = mu_word + mu_pos
-        mu_norm=layer_norm(mu) if layer_norm is not None else mu
     
-        error = target - mu_norm
+    if requires_update or mu_word_cache is None or mu_pos_cache is None:
+        mu_word = word_layer(input_ids)
+        mu_pos = pos_layer(position_ids)
+    else:
+        mu_word = mu_word_cache
+        mu_pos = mu_pos_cache
+        
+    mu = mu_word + mu_pos
+    mu_norm=layer_norm(mu) if layer_norm is not None else mu
+
+    error = target - mu_norm
         
     if requires_update: 
         with torch.no_grad():
@@ -100,46 +96,41 @@ def step_linear(
     device = x.device
     orig_dtype = x.dtype
     
-    use_amp = target.is_cuda and orig_dtype == torch.float32
-    autocast_ctx = autocast('cuda', dtype = torch.float16) if use_amp else nullcontext()
     
-    with autocast_ctx:
-        if layer_norm is not None and layer_type == "fc1":
-           x_input = layer_norm(x)
-        elif layer_type == "fc2":
-           x_input = F.gelu(x)
-        else:
-            x_input = x
-           
-        mu = layer(x_input)
+    
+    if layer_norm is not None and layer_type == "fc1":
+        x_input = layer_norm(x)
+    elif layer_type == "fc2":
+        x_input = F.gelu(x)
+    else:
+        x_input = x
         
-        if use_amp and mu.dtype != orig_dtype:
-            mu = mu.to(orig_dtype)
+    mu = layer(x_input)
+        
+    if layer_type == "fc1":
+        mu = F.gelu(mu)
+    elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
+        mu = layer_norm(mu)
             
-        if layer_type == "fc1":
-            mu = F.gelu(mu)
-        elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
-            mu = layer_norm(mu)
-              
-        if layer_type=="linear_output":
-            bu_err= target - F.softmax(mu, dim=-1) 
-        else:    
-            bu_err = target - mu 
-          
-        # project bottom-up error through weights
-        error_proj= bu_err @ layer.weight      
-        error = error_proj- td_err if td_err is not None else error_proj  
+    if layer_type=="linear_output":
+        bu_err= target - F.softmax(mu, dim=-1) 
+    else:    
+        bu_err = target - mu 
         
-        if lateral_conn is not None:
-           delta_x = lateral_conn.forward(x, error)
-           x = x + local_lr * delta_x
-
-           if requires_update:
-               lateral_conn.update_weights(x.detach())
-        else:
-          x= x + local_lr * error 
+    # project bottom-up error through weights
+    error_proj= bu_err @ layer.weight      
+    error = error_proj- td_err if td_err is not None else error_proj  
     
-        x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
+    if lateral_conn is not None:
+        delta_x = lateral_conn.forward(x, error)
+        x = x + local_lr * delta_x
+
+        if requires_update:
+            lateral_conn.update_weights(x.detach())
+    else:
+        x= x + local_lr * error 
+
+    x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
     
     # parameter updates for the layer
     if requires_update:
@@ -185,7 +176,6 @@ def step_attn(
     assert proj_layers is not None, "proj_layers dict is required for attention"
 
     device = x.device
-    orig_dtype = x.dtype
     
     x_norm=layer_norm(x) if layer_norm is not None else x
         
@@ -194,56 +184,49 @@ def step_attn(
     v_proj = proj_layers["v_proj"]
     assert q_proj is not None and k_proj is not None and v_proj is not None, "Missing Q/K/V projections" 
         
-    use_amp = target.is_cuda and orig_dtype == torch.float32
-    autocast_ctx = autocast('cuda', dtype = torch.float16) if use_amp else nullcontext()
         
     batch_size, seq_len, embed_dim = target.shape
     head_dim = n_embed // num_heads
 
-    with autocast_ctx:      
-        Q= q_proj(x_norm)
+         
+    Q= q_proj(x_norm)
+    
+    # KV Cache logic: only compute K,V for new tokens if cache exists
+    if use_cache and kv_cache is not None:
+        K_new = k_proj(x_norm)
+        V_new = v_proj(x_norm)
         
-        # KV Cache logic: only compute K,V for new tokens if cache exists
-        if use_cache and kv_cache is not None:
-            K_new = k_proj(x_norm)
-            V_new = v_proj(x_norm)
-            
-            K_cached, V_cached = kv_cache
-            K = torch.cat([K_cached, K_new], dim=1)
-            V = torch.cat([V_cached, V_new], dim=1)
-        else:
-            # Compute full K, V
-            K = k_proj(x_norm)
-            V = v_proj(x_norm)
+        K_cached, V_cached = kv_cache
+        K = torch.cat([K_cached, K_new], dim=1)
+        V = torch.cat([V_cached, V_new], dim=1)
+    else:
+        # Compute full K, V
+        K = k_proj(x_norm)
+        V = v_proj(x_norm)
+    
+    
+    
+    new_kv_cache = (K.detach(), V.detach()) if use_cache else None
+    Q = Q.view(batch_size, num_heads, seq_len, head_dim)
+    K = K.view(batch_size, num_heads, -1, head_dim)
+    V = V.view(batch_size, num_heads, -1, head_dim)
         
-        if use_amp:
-            Q = Q.to(orig_dtype)
-            K = K.to(orig_dtype)
-            V = V.to(orig_dtype)
-        
-        new_kv_cache = (K.detach(), V.detach()) if use_cache else None
-        Q = Q.view(batch_size, num_heads, seq_len, head_dim)
-        K = K.view(batch_size, num_heads, -1, head_dim)
-        V = V.view(batch_size, num_heads, -1, head_dim)
-            
-        #create causal mask (1=keep, 0=mask)
-        kv_len = K.size(2)
-        causal_mask = torch.tril(torch.ones(seq_len, kv_len, device=device)).unsqueeze(0).unsqueeze(0)
+    #create causal mask (1=keep, 0=mask)
+    kv_len = K.size(2)
+    causal_mask = torch.tril(torch.ones(seq_len, kv_len, device=device)).unsqueeze(0).unsqueeze(0)
 
-        # !! Causal Mask
-        if flash:
-            # TODO: add support for causal masking in flash attention
-            mu_heads = apply_flash_attention(Q, K, V)
-        else:
-            mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
+    # !! Causal Mask
+    if flash:
+        # TODO: add support for causal masking in flash attention
+        mu_heads = apply_flash_attention(Q, K, V)
+    else:
+        mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
+    
         
-        if mu_heads.dtype != orig_dtype:
-            mu_heads = mu_heads.to(orig_dtype)
-            
-        mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
-     
-        bu_err = target - mu  # B, T, D
-        error = bu_err - td_err if td_err is not None else bu_err  
+    mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
+    
+    bu_err = target - mu  # B, T, D
+    error = bu_err - td_err if td_err is not None else bu_err  
                 
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, error)
