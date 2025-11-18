@@ -210,6 +210,9 @@ def main():
     global_step = 0
     train_energies = []
     val_energies = []
+    train_perplexities = [] 
+    val_perplexities = []
+
     start_time = time.time()
     if rank == 0:
         logger.info("========== Training started ==========") 
@@ -227,6 +230,7 @@ def main():
             model, train_loader, config, global_step, device, logger
         )
         train_energies.append(train_energy)
+        train_perplexities.append(train_perplexity)
 
         model.eval()
         with torch.no_grad():
@@ -235,6 +239,7 @@ def main():
             )
         
         val_energies.append(val_energy)
+        val_perplexities.append(val_perplexity)
 
         if rank == 0:
             logger.info(f"Epoch {epoch + 1}/{config.num_epochs} | "
@@ -258,7 +263,13 @@ def main():
                 logger.info(f"Saved checkpoint to {checkpoint_path}")
 
     if rank == 0:
-        plot_metrics(train_energies, val_energies)
+        plot_metrics(
+            train_energies,
+            val_energies,
+            train_perplexities,
+            val_perplexities
+        )
+
         os.makedirs("checkpoints", exist_ok=True)
         # Get the underlying model (handle both DDP and non-DDP cases)
         model_to_save = model.module if hasattr(model, 'module') else model
