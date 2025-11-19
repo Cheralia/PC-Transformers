@@ -83,7 +83,6 @@ class PCTransformer(nn.Module):
             proj_layers=None,
             input_ids=input_ids,
             position_ids=position_ids,
-            device=device,
             initial_x=embed_initial
         )
         
@@ -101,7 +100,7 @@ class PCTransformer(nn.Module):
                 layer = None,
                 proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
                 input_ids = None,
-                position_ids = None,,
+                position_ids = None,
                 initial_x=attn_initial
             )
             block.attn.pc_output.init_x(
@@ -123,7 +122,7 @@ class PCTransformer(nn.Module):
                 layer=block.mlp.fc1,
                 proj_layers= None, 
                 input_ids = None,
-                position_ids = None,,
+                position_ids = None,
                 initial_x=mlp1_initial
             )
             block.mlp.pc_layer2.init_x(
@@ -134,7 +133,7 @@ class PCTransformer(nn.Module):
                 layer=block.mlp.fc2,
                 proj_layers= None, 
                 input_ids = None,
-                position_ids = None,,
+                position_ids = None,
                 initial_x=mlp2_initial
             )
         self.output.pc_layer.init_x(
@@ -282,11 +281,11 @@ class PCTransformer(nn.Module):
                 # Update cache after last iteration
                 if use_kv_cache and t == self.config.T - 1:
                     block.attn.kv_cache = block.attn.pc_qkv._last_kv_cache
-                    if idx== len(self.blocks) -1:
-                  self.replay_buffer.record_step(block.attn.pc_qkv, "attn", t, self.config.T)   
-                  self.replay_buffer.record_step(block.attn.pc_output, "linear_attn", t, self.config.T)
-                  self.replay_buffer.record_step(block.mlp.pc_layer1, "fc1", t, self.config.T) 
-                  self.replay_buffer.record_step(block.mlp.pc_layer2, "fc2", t, self.config.T)
+                if idx== len(self.blocks) -1:
+                    self.replay_buffer.record_step(block.attn.pc_qkv, "attn", t, self.config.T)   
+                    self.replay_buffer.record_step(block.attn.pc_output, "linear_attn", t, self.config.T)
+                    self.replay_buffer.record_step(block.mlp.pc_layer1, "fc1", t, self.config.T) 
+                    self.replay_buffer.record_step(block.mlp.pc_layer2, "fc2", t, self.config.T)
             # Execute embedding layer
             execute_parallel(
                 use_cuda,
