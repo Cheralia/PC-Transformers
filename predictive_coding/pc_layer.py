@@ -185,7 +185,6 @@ class PCLayer(nn.Module):
         proj_layers: Optional[dict] = None,
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
-        device: torch.device = None,
         initial_x: Optional[torch.Tensor] = None,
     ):
         """
