@@ -216,25 +216,24 @@ class PCLayer(nn.Module):
                self._x_cache["attn"] = initial_x
             else:
                self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
-
-            if self.use_lateral:
-                self.register_lateral(layer_type, H_in)
                 
-                if layer_type in self.W_latents:
-                    self.W_latents[layer_type] = self.W_latents[layer_type].to(device)
+            if layer_type in self.lateral_connections:
+               self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
+           
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
+            
             if initial_x is not None:
                assert initial_x.shape == (batch_size, seq_len, input_dim), f"Shape mismatch for layer {layer_type}"
                self._x_cache[layer_type] = initial_x
             else:
                self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
-            H_in = layer.weight.shape[1]
-
-            if self.use_lateral:
-                self.register_lateral(layer_type, H_in)
-
+            
+            self.register_lateral(layer_type, input_dim)   
+            if layer_type in self.lateral_connections:
+                self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
+    
                 
 
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
