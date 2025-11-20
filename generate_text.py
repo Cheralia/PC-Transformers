@@ -18,9 +18,8 @@ It takes a prompt, generates new tokens, and prints the prompt, target, and gene
 Usage: torchrun --nproc-per-node=<NUM_GPU> generate_text.py
 
 """
-
-
 local_rank, device, use_ddp = setup_device()
+
 def generate_text(model, config, input_ids, max_new_tokens, temperature, device = None, use_cache=True):
     model.eval()
     
@@ -72,7 +71,6 @@ def text_generation(model, config, device = None,  max_samples=2, max_new_tokens
     return decoded_preds
 
 def main():
-   
     parser = argparse.ArgumentParser()
     parser.add_argument('--flash', action='store_true', help='Enable FlashAttention for attention layers')
     args = parser.parse_args()
@@ -95,14 +93,14 @@ def main():
         T = best_config["T"],
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
-        batch_size = 8,
-        num_epochs = 1,
+        batch_size = best_config["batch_size"],
+        num_epochs = best_config["num_epochs"], 
         update_bias = best_config["update_bias"],
-        internal_energy_fn_name="pc_e",
-        output_energy_fn_name="pc_e",
-        combined_internal_weight=0.7,
-        combined_output_weight=0.3,
-        use_flash_attention=False,
+        internal_energy_fn_name=best_config["internal_energy_fn_name"],
+        output_energy_fn_name=best_config["output_energy_fn_name"],
+        combined_internal_weight=best_config["combined_internal_weight"],
+        combined_output_weight=best_config["combined_output_weight"],
+        use_flash_attention=best_config["use_flash_attention"],
         alpha = best_config["alpha"]    
     )
     
