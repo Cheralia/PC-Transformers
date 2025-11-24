@@ -3,6 +3,7 @@ from tokenizers import Tokenizer
 from predictive_coding.config import GPTConfig
 from utils.model_utils import load_model, decode_ids, compute_text_metrics
 from utils.config_utils import load_best_config
+from utils.model_utils import set_seed
 import torch.nn.functional as F
 from data_preparation.dataloader import get_loaders
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -71,6 +72,7 @@ def text_generation(model, config, device = None,  max_samples=2, max_new_tokens
     return decoded_preds
 
 def main():
+    set_seed(42)
     parser = argparse.ArgumentParser()
     parser.add_argument('--flash', action='store_true', help='Enable FlashAttention for attention layers')
     args = parser.parse_args()

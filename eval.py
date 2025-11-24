@@ -8,6 +8,7 @@ from data_preparation.dataloader import get_loaders
 import torch.nn.functional as F
 from utils.model_utils import load_model
 from utils.config_utils import load_best_config
+from utils.model_utils import set_seed
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils.device_utils import setup_device
@@ -103,6 +104,7 @@ def evaluate(model, dataloader, max_batches=None, device = None):
     return avg_energy, avg_perplexity
 
 def main():
+    set_seed(42)
     parser = argparse.ArgumentParser()
     parser.add_argument('--flash', action='store_true', help='Enable FlashAttention for attention layers')
     args = parser.parse_args()

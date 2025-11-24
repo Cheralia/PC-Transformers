@@ -10,6 +10,7 @@ from tuning.tuning_logs import initialize_logs, write_final_results
 import torch.distributed as dist
 import argparse
 from utils.device_utils import setup_device
+from utils.model_utils import set_seed
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         return study
 
 if __name__ == "__main__":
+    set_seed(42)
     parser = argparse.ArgumentParser(description="Bayesian Hyperparameter Tuning with Predictive Coding Transformer")
     parser.add_argument('--flash', '--flash_attention', action='store_true', help='Enable FlashAttention for attention layers')
     parser.add_argument('--log_batches', action='store_true', help='Enable batch-level logging during tuning')
@@ -102,10 +104,6 @@ if __name__ == "__main__":
             format=f"[Rank {rank}] %(asctime)s - %(levelname)s - %(message)s",
             stream=sys.stdout
         )
-
-    torch.manual_seed(42)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(42)
     
     local_rank, device, use_ddp = setup_device()
     

@@ -5,6 +5,7 @@ import pickle
 from training import train
 from eval import evaluate
 from utils.pc_utils import cleanup_memory
+from utils.model_utils import set_seed
 from model_architecture.pc_t_model import PCTransformer
 from predictive_coding.config import GPTConfig
 from tuning.config import get_dynamic_model_config, update_global_config
@@ -37,6 +38,7 @@ def broadcast_config(config_dict, device):
 
 def objective(trial, device = None, flash=False, enable_batch_logging=False):
     """Bayesian Objective function"""
+    set_seed(42 + trial.number)
     start_time = time.time()
     model = None
     

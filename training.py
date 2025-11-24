@@ -11,6 +11,7 @@ from model_architecture.pc_t_model import PCTransformer
 from data_preparation.dataloader import get_loaders
 from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
+from utils.model_utils import set_seed
 from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
@@ -128,6 +129,7 @@ def train(model, dataloader, config, global_step, device, logger):
 
 
 def main():
+    set_seed(42)
     local_rank, device, use_ddp = setup_device()
     if use_ddp and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
