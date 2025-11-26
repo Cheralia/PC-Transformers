@@ -29,10 +29,10 @@ class PCTransformer(nn.Module):
         """
         for block in self.blocks:
             block.attn.pc_qkv.register_lateral("attn", block.attn.q.in_features)
-            block.attn.pc_output.register_lateral("linear", block.attn.output.in_features)
+            block.attn.pc_output.register_lateral("linear_attn", block.attn.output.in_features)
             block.mlp.pc_layer1.register_lateral("fc1", block.mlp.fc1.in_features)
-            block.mlp.pc_layer2.register_lateral("linear", block.mlp.fc2.in_features)
-        self.output.pc_layer.register_lateral("linear", self.output.output.in_features)
+            block.mlp.pc_layer2.register_lateral("fc2", block.mlp.fc2.in_features)
+        self.output.pc_layer.register_lateral("linear_output", self.output.output.in_features)
 
         for module in self.modules():
             if hasattr(module, 'W_latents'):
@@ -91,7 +91,7 @@ class PCTransformer(nn.Module):
             attn_out_initial = self.replay_buffer.get_initial_state("linear_attn")
             mlp1_initial = self.replay_buffer.get_initial_state("fc1")
             mlp2_initial = self.replay_buffer.get_initial_state("fc2")
-            output_initial = self.replay_buffer.get_initial_state("output")
+            output_initial = self.replay_buffer.get_initial_state("linear_output")
             block.attn.pc_qkv.init_x(
                 batch_size=B,
                 seq_len=S,
@@ -172,7 +172,6 @@ class PCTransformer(nn.Module):
                 flash=False
 
             )
-            self.replay_buffer.record_step(self.output.pc_layer, "output", t, self.config.T)
             # Iterate through blocks in reverse order for parallel execution
             for idx in range(len(self.blocks) - 1, -1, -1):
                 block = self.blocks[idx]
@@ -281,11 +280,6 @@ class PCTransformer(nn.Module):
                 # Update cache after last iteration
                 if use_kv_cache and t == self.config.T - 1:
                     block.attn.kv_cache = block.attn.pc_qkv._last_kv_cache
-                if idx== len(self.blocks) -1:
-                    self.replay_buffer.record_step(block.attn.pc_qkv, "attn", t, self.config.T)   
-                    self.replay_buffer.record_step(block.attn.pc_output, "linear_attn", t, self.config.T)
-                    self.replay_buffer.record_step(block.mlp.pc_layer1, "fc1", t, self.config.T) 
-                    self.replay_buffer.record_step(block.mlp.pc_layer2, "fc2", t, self.config.T)
             # Execute embedding layer
             execute_parallel(
                 use_cuda,
@@ -307,6 +301,17 @@ class PCTransformer(nn.Module):
             self.replay_buffer.record_step(self.embedding.pc_layer, "embed", t, self.config.T)
             # Synchronize all parallel tasks
             synchronize_execution(use_cuda, streams_or_futures)
+        final_t = self.config.T - 1
+        self.replay_buffer.record_step(self.embedding.pc_layer, "embed", final_t, self.config.T)
+        self.replay_buffer.record_step(self.output.pc_layer, "linear_output", final_t, self.config.T)
+        for block in self.blocks:
+            self.replay_buffer.record_step(block.attn.pc_qkv, "attn", final_t, self.config.T)
+            self.replay_buffer.record_step(block.attn.pc_output, "linear_attn", final_t, self.config.T)
+            self.replay_buffer.record_step(block.mlp.pc_layer1, "fc1", final_t, self.config.T)
+            self.replay_buffer.record_step(block.mlp.pc_layer2, "fc2", final_t, self.config.T)
+
+        self.replay_buffer.finalize_recording()
+        
         logits = self.output.pc_layer.get_mu("linear_output")
         return logits
     

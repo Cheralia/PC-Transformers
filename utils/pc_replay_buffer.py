@@ -27,9 +27,10 @@ class PCReplayBuffer:
            "x_state": x_state.detach().clone()  # Now safe — always a tensor
         })
 
-        if t == T - 1:
-           self._reduce_to_best_states()
-        #    print(f"[DEBUG] Saved best state for {layer_type} to replay buffer")
+    def finalize_recording(self):
+       """Call this AFTER all record_step calls at t == T-1."""
+       self._reduce_to_best_states() 
+    
     def _reduce_to_best_states(self):
         if not self.records:
             return
