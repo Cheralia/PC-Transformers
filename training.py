@@ -37,11 +37,7 @@ def train(model, dataloader, config, global_step, device, logger):
 
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
-
-    alpha = getattr(config, 'combined_internal_weight', 0.3)
-    beta = getattr(config, 'combined_output_weight', 0.7)
     
-
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
@@ -107,8 +103,7 @@ def train(model, dataloader, config, global_step, device, logger):
         avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
                 
         if output_energy is not None:
-           avg_output_energy = output_energy
-           batch_energy = alpha * avg_internal_energy + beta* avg_output_energy 
+            batch_energy = config.combined_internal_weight * avg_internal_energy + config.combined_output_weight * output_energy 
         else:
             batch_energy = avg_internal_energy
         total_energy += batch_energy

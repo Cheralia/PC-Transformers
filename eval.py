@@ -31,9 +31,6 @@ def evaluate(model, dataloader, max_batches=None, device = None):
     
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
-
-    alpha = getattr(base_model.config, 'combined_internal_weight', 0.3)
-    beta = getattr(base_model.config, 'combined_output_weight', 0.7)
     
     if local_rank == 0:
         if max_batches is None:
@@ -78,11 +75,10 @@ def evaluate(model, dataloader, max_batches=None, device = None):
                 else: 
                     internal_energies.append(energy)
 
-        avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
+        avg_internal_energy = sum(internal_energies) / len(internal_energies)
                 
         if output_energy is not None:
-           avg_output_energy = output_energy
-           batch_energy = alpha * avg_internal_energy + beta* avg_output_energy 
+           batch_energy = config.combined_internal_weight * avg_internal_energy + config.combined_output_weight * output_energy 
         else:
             batch_energy = avg_internal_energy
 
