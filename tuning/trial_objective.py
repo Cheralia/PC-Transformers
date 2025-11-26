@@ -78,7 +78,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
 
         model.eval()
-        avg_energy, avg_perplexity = evaluate(model, valid_loader, max_batches=None, device=device)
+        avg_energy, avg_perplexity = evaluate(model, config, valid_loader, max_batches=None, device=device)
         
         train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
         

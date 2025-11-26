@@ -23,7 +23,7 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> eval.py
 """
 local_rank, device, use_ddp = setup_device()
 
-def evaluate(model, dataloader, max_batches=None, device = None):
+def evaluate(model, config, dataloader, max_batches=None, device = None):
     model.eval()
     total_energy = 0.0
     batch_count = 0
@@ -143,7 +143,7 @@ def main():
     # Max batches can be set to limit evaluation, or None for full dataset
     start_time = time.time()
     with torch.no_grad(): 
-        evaluate(model, test_loader, max_batches= None, device=device)
+        evaluate(model, config, test_loader, max_batches= None, device=device)
         
     elapsed = time.time() - start_time
     if not dist.is_initialized() or dist.get_rank() == 0:

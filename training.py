@@ -232,7 +232,7 @@ def main():
         model.eval()
         with torch.no_grad():
             val_energy, val_perplexity = evaluate(
-                model, valid_loader, max_batches=None, device=device
+                model, config, valid_loader, max_batches=None, device=device
             )
         
         val_energies.append(val_energy)
