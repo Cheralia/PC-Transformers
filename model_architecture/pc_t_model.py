@@ -296,7 +296,6 @@ class PCTransformer(nn.Module):
                 position_ids=position_ids,
                 flash=False
             )
-            self.replay_buffer.record_step(self.embedding.pc_layer, "embed", t, self.config.T)
             # Synchronize all parallel tasks
             synchronize_execution(use_cuda, streams_or_futures)
         if self.training :
