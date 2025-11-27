@@ -72,8 +72,6 @@ class PCTransformer(nn.Module):
         target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
         # Initialize all predictive coding layers
-        embed_initial= self.replay_buffer.get_initial_state("embed")
-        # print(f"[DEBUG] _initial is None: {embed_initial is None}")
         self.embedding.pc_layer.init_x(
             batch_size=B,
             seq_len=S,
@@ -83,15 +81,15 @@ class PCTransformer(nn.Module):
             proj_layers=None,
             input_ids=input_ids,
             position_ids=position_ids,
-            initial_x=embed_initial
+            initial_x=None
         )
         
         for block in self.blocks:
-            attn_initial = self.replay_buffer.get_initial_state("attn")
-            attn_out_initial = self.replay_buffer.get_initial_state("linear_attn")
-            mlp1_initial = self.replay_buffer.get_initial_state("fc1")
-            mlp2_initial = self.replay_buffer.get_initial_state("fc2")
-            output_initial = self.replay_buffer.get_initial_state("linear_output")
+            attn_initial = self.replay_buffer.get_initial_state("attn") if self.training else None
+            attn_out_initial = self.replay_buffer.get_initial_state("linear_attn") if self.training else None
+            mlp1_initial = self.replay_buffer.get_initial_state("fc1") if self.training else None
+            mlp2_initial = self.replay_buffer.get_initial_state("fc2") if self.training else None
+            output_initial = self.replay_buffer.get_initial_state("linear_output") if self.training else None
             block.attn.pc_qkv.init_x(
                 batch_size=B,
                 seq_len=S,
@@ -301,16 +299,16 @@ class PCTransformer(nn.Module):
             self.replay_buffer.record_step(self.embedding.pc_layer, "embed", t, self.config.T)
             # Synchronize all parallel tasks
             synchronize_execution(use_cuda, streams_or_futures)
-        final_t = self.config.T - 1
-        self.replay_buffer.record_step(self.embedding.pc_layer, "embed", final_t, self.config.T)
-        self.replay_buffer.record_step(self.output.pc_layer, "linear_output", final_t, self.config.T)
-        for block in self.blocks:
-            self.replay_buffer.record_step(block.attn.pc_qkv, "attn", final_t, self.config.T)
-            self.replay_buffer.record_step(block.attn.pc_output, "linear_attn", final_t, self.config.T)
-            self.replay_buffer.record_step(block.mlp.pc_layer1, "fc1", final_t, self.config.T)
-            self.replay_buffer.record_step(block.mlp.pc_layer2, "fc2", final_t, self.config.T)
+        if self.training :
+            final_t = self.config.T - 1
+            self.replay_buffer.record_step(self.output.pc_layer, "linear_output", final_t, self.config.T)
+            for block in self.blocks:
+                self.replay_buffer.record_step(block.attn.pc_qkv, "attn", final_t, self.config.T)
+                self.replay_buffer.record_step(block.attn.pc_output, "linear_attn", final_t, self.config.T)
+                self.replay_buffer.record_step(block.mlp.pc_layer1, "fc1", final_t, self.config.T)
+                self.replay_buffer.record_step(block.mlp.pc_layer2, "fc2", final_t, self.config.T)
 
-        self.replay_buffer.finalize_recording()
+            self.replay_buffer.finalize_recording()
         
         logits = self.output.pc_layer.get_mu("linear_output")
         return logits
