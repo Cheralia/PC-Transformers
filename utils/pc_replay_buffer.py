@@ -60,9 +60,7 @@ class PCReplayBuffer:
                 "energy": energy,
                 "x_state": x_state
             })
-            if t == T - 1:
-                self._reduce_to_best_states()
-
+            
     def finalize_recording(self):
         """No-op in FIFO mode. In best-energy mode, finalize reduction."""
         if not self.fifo:
