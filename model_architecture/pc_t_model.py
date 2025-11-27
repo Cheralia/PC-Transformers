@@ -145,8 +145,8 @@ class PCTransformer(nn.Module):
             input_ids = None,
             position_ids = None,
         )
-
-        # Initialize streams or futures for parallel execution
+        
+                # Initialize streams or futures for parallel execution
         use_cuda, streams_or_futures = create_streams_or_futures(device, len(self.blocks) * 4 + 2)
 
         for t in range(self.config.T):
@@ -298,16 +298,15 @@ class PCTransformer(nn.Module):
             )
             # Synchronize all parallel tasks
             synchronize_execution(use_cuda, streams_or_futures)
-        if self.training :
-            final_t = self.config.T - 1
-            self.replay_buffer.record_step(self.output.pc_layer, "linear_output", final_t, self.config.T)
+            if self.training :
+            self.replay_buffer.record_step(self.output.pc_layer, "linear_output", t, self.config.T)
             for block in self.blocks:
-                self.replay_buffer.record_step(block.attn.pc_qkv, "attn", final_t, self.config.T)
-                self.replay_buffer.record_step(block.attn.pc_output, "linear_attn", final_t, self.config.T)
-                self.replay_buffer.record_step(block.mlp.pc_layer1, "fc1", final_t, self.config.T)
-                self.replay_buffer.record_step(block.mlp.pc_layer2, "fc2", final_t, self.config.T)
+                self.replay_buffer.record_step(block.attn.pc_qkv, "attn", t, self.config.T)
+                self.replay_buffer.record_step(block.attn.pc_output, "linear_attn", t, self.config.T)
+                self.replay_buffer.record_step(block.mlp.pc_layer1, "fc1", t, self.config.T)
+                self.replay_buffer.record_step(block.mlp.pc_layer2, "fc2", t, self.config.T)
 
-            self.replay_buffer.finalize_recording()
+                self.replay_buffer.finalize_recording()
         
         logits = self.output.pc_layer.get_mu("linear_output")
         return logits
