@@ -5,6 +5,7 @@ import pickle
 from training import train
 from eval import evaluate
 from utils.pc_utils import cleanup_memory
+from utils.model_utils import set_seed
 from model_architecture.pc_t_model import PCTransformer
 from predictive_coding.config import GPTConfig
 from tuning.config import get_dynamic_model_config, update_global_config
@@ -37,6 +38,7 @@ def broadcast_config(config_dict, device):
 
 def objective(trial, device = None, flash=False, enable_batch_logging=False):
     """Bayesian Objective function"""
+    set_seed(42 + trial.number)
     start_time = time.time()
     model = None
     
@@ -76,7 +78,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
 
         model.eval()
-        avg_energy, avg_perplexity = evaluate(model, valid_loader, max_batches=None, device=device)
+        avg_energy, avg_perplexity = evaluate(model, config, valid_loader, max_batches=None, device=device)
         
         train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
         

@@ -1,4 +1,7 @@
 import torch
+import numpy as np
+import random
+import os
 from model_architecture.pc_t_model import PCTransformer
 from bert_score import score as bertscore
 from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
@@ -41,5 +44,23 @@ def decode_ids(tokenizer, ids, stop_at_eos = True):
         text = text.split("[EOS]")[0].strip()
     return text
 
-
-
+def set_seed(seed: int = 42):
+    """
+    Set random seed for reproducibility.
+    
+    Args:
+        seed (int): Random seed value
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    
+    # For CUDA
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  
+    
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    # For Python hash randomization
+    os.environ['PYTHONHASHSEED'] = str(seed)
