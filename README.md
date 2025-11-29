@@ -115,10 +115,6 @@ torchrun --nproc-per-node=<NUM_GPUS> generate_text.py --flash --prompt "once upo
 ```
 
 ## Model Structure
-<div align="center">
-  <img src="assets/PC_T.jpg" width="45%" alt="PC-Transformer Architecture"/>
-  <img src="assets/pc_layer.jpg" width="45%" alt="Predictive Coding Layer"/>
-</div>
 
 The PC-Transformer follows a hierarchical predictive coding architecture where each layer iteratively refines its predictions through local error signals:
 - **Embedding Layer:** Maps tokens and positions to vectors.
