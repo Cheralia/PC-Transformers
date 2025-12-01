@@ -22,23 +22,35 @@ def apply_flash_attention(q, k, v, mask=None):
     """
     Apply FlashAttention if available, else fallback to standard attention.
     Args:
-        q, k, v: Query, Key, Value tensors (B, num_heads, T, head_dim)
+        q, k, v: Tensors of shape (B, num_heads, T, head_dim)
         mask: Optional mask tensor
     Returns:
-        attn_output: Output tensor after attention
+        attn_output: Output tensor after attention with shape (B, num_heads, T, head_dim)
     """
+
     if not FLASH_AVAILABLE:
         return apply_standard_attention(q, k, v, mask)
+
     B, num_heads, T, head_dim = q.shape
-    # FlashAttention expects [B, T, 3, num_heads, head_dim]
-    qkv = torch.stack([q, k, v], dim=2) # [B, T, 3, num_heads, head_dim]
+    qkv = torch.stack([q, k, v], dim=2) 
+    qkv = qkv.permute(0, 3, 2, 1, 4).contiguous()  
+    #FlashAttention expects shape: [B, T, 3, num_heads, head_dim]
+
     orig_dtype = qkv.dtype
-    with autocast(device_type=device, dtype=torch.float16):
-        if qkv.dtype not in [torch.float16, torch.bfloat16]:
-            qkv = qkv.to(torch.float16)
-        attn_out = flash_attn_qkvpacked_func(qkv, 0.0, None, causal=True)
-        attn_out = attn_out.to(orig_dtype)
-    # Output: [B, T, num_heads, head_dim] -> [B, num_heads, T, head_dim]
+    if orig_dtype not in (torch.float16, torch.bfloat16):
+        qkv = qkv.to(torch.float16)
+    attn_out = flash_attn_qkvpacked_func(
+        qkv,
+        dropout_p=0.0,
+        softmax_scale=None,
+        causal=True
+    )
+
+    attn_out = attn_out.to(orig_dtype)
+
+    # Return to standard attention shape: (B, num_heads, T, head_dim)
+    attn_out = attn_out.permute(0, 2, 1, 3).contiguous()
+
     return attn_out
 
 def apply_standard_attention(q, k, v, mask=None):
