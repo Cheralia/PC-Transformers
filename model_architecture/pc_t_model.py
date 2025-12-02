@@ -83,13 +83,13 @@ class PCTransformer(nn.Module):
             position_ids=position_ids,
             initial_x=None
         )
-        
+        output_initial = self.replay_buffer.get_initial_state("linear_output") if self.training else None
+
         for block in self.blocks:
             attn_initial = self.replay_buffer.get_initial_state("attn") if self.training else None
             attn_out_initial = self.replay_buffer.get_initial_state("linear_attn") if self.training else None
             mlp1_initial = self.replay_buffer.get_initial_state("fc1") if self.training else None
             mlp2_initial = self.replay_buffer.get_initial_state("fc2") if self.training else None
-            output_initial = self.replay_buffer.get_initial_state("linear_output") if self.training else None
             block.attn.pc_qkv.init_x(
                 batch_size=B,
                 seq_len=S,
@@ -106,11 +106,11 @@ class PCTransformer(nn.Module):
                 seq_len=S,
                 layer_type="linear_attn",
                 device=device,
-                initial_x=attn_out_initial,
                 layer=block.attn.output,
                 proj_layers= None, 
                 input_ids = None,
                 position_ids = None,
+                initial_x=output_initial
             )
             block.mlp.pc_layer1.init_x(
                 batch_size=B,
@@ -298,7 +298,7 @@ class PCTransformer(nn.Module):
             )
             # Synchronize all parallel tasks
             synchronize_execution(use_cuda, streams_or_futures)
-            if self.training :
+        if self.training :
                 self.replay_buffer.record_step(self.output.pc_layer, "linear_output", t, self.config.T)
                 for block in self.blocks:
                     self.replay_buffer.record_step(block.attn.pc_qkv, "attn", t, self.config.T)
@@ -306,7 +306,7 @@ class PCTransformer(nn.Module):
                     self.replay_buffer.record_step(block.mlp.pc_layer1, "fc1", t, self.config.T)
                     self.replay_buffer.record_step(block.mlp.pc_layer2, "fc2", t, self.config.T)
 
-                    self.replay_buffer.finalize_recording()
+                self.replay_buffer.finalize_recording()
             
         logits = self.output.pc_layer.get_mu("linear_output")
         return logits
