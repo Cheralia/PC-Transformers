@@ -1,7 +1,7 @@
 
 import matplotlib.pyplot as plt
 from pathlib import Path
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, MultipleLocator
 
 def plot_metrics(
     train_energies, 
@@ -54,6 +54,9 @@ def plot_metrics(
 
         ax = plt.gca()
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+        if max(train_perplexities) > 100:
+            ax.yaxis.set_major_locator(MultipleLocator(100))
 
         save_path_ppl = assets_dir / 'perplexity_plot.png'
         plt.savefig(save_path_ppl)

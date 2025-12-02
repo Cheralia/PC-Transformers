@@ -11,6 +11,7 @@ from model_architecture.pc_t_model import PCTransformer
 from data_preparation.dataloader import get_loaders
 from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
+from utils.model_utils import set_seed
 from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
@@ -36,11 +37,7 @@ def train(model, dataloader, config, global_step, device, logger):
 
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
-
-    alpha = getattr(config, 'combined_internal_weight', 0.3)
-    beta = getattr(config, 'combined_output_weight', 0.7)
     
-
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
@@ -106,8 +103,7 @@ def train(model, dataloader, config, global_step, device, logger):
         avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
                 
         if output_energy is not None:
-           avg_output_energy = output_energy
-           batch_energy = alpha * avg_internal_energy + beta* avg_output_energy 
+            batch_energy = config.combined_internal_weight * avg_internal_energy + config.combined_output_weight * output_energy 
         else:
             batch_energy = avg_internal_energy
         total_energy += batch_energy
@@ -128,6 +124,7 @@ def train(model, dataloader, config, global_step, device, logger):
 
 
 def main():
+    set_seed(42)
     local_rank, device, use_ddp = setup_device()
     if use_ddp and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
@@ -235,7 +232,7 @@ def main():
         model.eval()
         with torch.no_grad():
             val_energy, val_perplexity = evaluate(
-                model, valid_loader, max_batches=None, device=device
+                model, config, valid_loader, max_batches=None, device=device
             )
         
         val_energies.append(val_energy)

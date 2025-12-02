@@ -2,17 +2,16 @@ import time
 import math
 import torch
 import math
-import os
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from data_preparation.dataloader import get_loaders
 import torch.nn.functional as F
 from utils.model_utils import load_model
 from utils.config_utils import load_best_config
-from utils.pc_utils import cleanup_memory
+from utils.model_utils import set_seed
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
-from utils.device_utils import setup_device, cleanup_memory
+from utils.device_utils import setup_device
 import argparse
 from data_preparation.config import vocab_size
 
@@ -22,10 +21,9 @@ This script evaluates the performance of the predictive coding transformer model
 Usage: torchrun --nproc-per-node=<NUM_GPU> eval.py
 
 """
-
 local_rank, device, use_ddp = setup_device()
 
-def evaluate(model, dataloader, max_batches=None, device = None):
+def evaluate(model, config, dataloader, max_batches=None, device = None):
     model.eval()
     total_energy = 0.0
     batch_count = 0
@@ -33,9 +31,6 @@ def evaluate(model, dataloader, max_batches=None, device = None):
     
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
-
-    alpha = getattr(base_model.config, 'combined_internal_weight', 0.3)
-    beta = getattr(base_model.config, 'combined_output_weight', 0.7)
     
     if local_rank == 0:
         if max_batches is None:
@@ -80,11 +75,10 @@ def evaluate(model, dataloader, max_batches=None, device = None):
                 else: 
                     internal_energies.append(energy)
 
-        avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
+        avg_internal_energy = sum(internal_energies) / len(internal_energies)
                 
         if output_energy is not None:
-           avg_output_energy = output_energy
-           batch_energy = alpha * avg_internal_energy + beta* avg_output_energy 
+           batch_energy = config.combined_internal_weight * avg_internal_energy + config.combined_output_weight * output_energy 
         else:
             batch_energy = avg_internal_energy
 
@@ -92,24 +86,21 @@ def evaluate(model, dataloader, max_batches=None, device = None):
         batch_count += 1
 
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
-        if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
+        if not dist.is_initialized() or dist.get_rank() == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
    
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
   
-    
-
     if not dist.is_initialized() or dist.get_rank() == 0:
         print(f"Total Batches Processed: {batch_idx + 1}")
         print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
-    
 
     return avg_energy, avg_perplexity
 
 def main():
-    
+    set_seed(42)
     parser = argparse.ArgumentParser()
     parser.add_argument('--flash', action='store_true', help='Enable FlashAttention for attention layers')
     args = parser.parse_args()
@@ -131,8 +122,8 @@ def main():
         T = best_config["T"],
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
-        batch_size = 8,
-        num_epochs = 1,
+        batch_size = best_config["batch_size"],
+        num_epochs = best_config["num_epochs"], 
         update_bias = best_config["update_bias"],
         internal_energy_fn_name=best_config["internal_energy_fn_name"],
         output_energy_fn_name=best_config["output_energy_fn_name"],
@@ -152,7 +143,7 @@ def main():
     # Max batches can be set to limit evaluation, or None for full dataset
     start_time = time.time()
     with torch.no_grad(): 
-        evaluate(model, test_loader, max_batches= None, device=device)
+        evaluate(model, config, test_loader, max_batches= None, device=device)
         
     elapsed = time.time() - start_time
     if not dist.is_initialized() or dist.get_rank() == 0:

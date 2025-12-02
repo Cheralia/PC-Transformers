@@ -1,11 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-import warnings
 import gc
 from typing import Optional, Tuple, Any
-from contextlib import nullcontext
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
@@ -25,8 +22,6 @@ def step_embed(
     energy_fn_name: str,
     requires_update: bool,
     layer_norm: Optional[nn.Module] = None,
-    mu_word_cache: Optional[torch.Tensor] = None,
-    mu_pos_cache: Optional[torch.Tensor] = None,
     )-> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Predictive coding step for embedding layer.
@@ -42,14 +37,9 @@ def step_embed(
     max_pos = pos_layer.weight.size(0)
     if position_ids.max() >= max_pos:
         position_ids = torch.clamp(position_ids, max=max_pos-1)
-        
-    
-    if requires_update or mu_word_cache is None or mu_pos_cache is None:
-        mu_word = word_layer(input_ids)
-        mu_pos = pos_layer(position_ids)
-    else:
-        mu_word = mu_word_cache
-        mu_pos = mu_pos_cache
+         
+    mu_word = word_layer(input_ids)
+    mu_pos = pos_layer(position_ids)
         
     mu = mu_word + mu_pos
     mu_norm=layer_norm(mu) if layer_norm is not None else mu
@@ -93,11 +83,6 @@ def step_linear(
     Predictive coding step for linear-like layers.
     Returns: (updated_x, mu, bu_err)
     """
-    device = x.device
-    orig_dtype = x.dtype
-    
-    
-    
     if layer_norm is not None and layer_type == "fc1":
         x_input = layer_norm(x)
     elif layer_type == "fc2":
@@ -182,13 +167,11 @@ def step_attn(
     q_proj = proj_layers["q_proj"]
     k_proj = proj_layers["k_proj"]
     v_proj = proj_layers["v_proj"]
-    assert q_proj is not None and k_proj is not None and v_proj is not None, "Missing Q/K/V projections" 
-        
+    assert q_proj is not None and k_proj is not None and v_proj is not None, "Missing Q/K/V projections"  
         
     batch_size, seq_len, embed_dim = target.shape
     head_dim = n_embed // num_heads
-
-         
+   
     Q= q_proj(x_norm)
     
     # KV Cache logic: only compute K,V for new tokens if cache exists
@@ -204,8 +187,6 @@ def step_attn(
         K = k_proj(x_norm)
         V = v_proj(x_norm)
     
-    
-    
     new_kv_cache = (K.detach(), V.detach()) if use_cache else None
     Q = Q.view(batch_size, num_heads, seq_len, head_dim)
     K = K.view(batch_size, num_heads, -1, head_dim)
@@ -217,12 +198,10 @@ def step_attn(
 
     # !! Causal Mask
     if flash:
-        # TODO: add support for causal masking in flash attention
-        mu_heads = apply_flash_attention(Q, K, V)
+        mu_heads = apply_flash_attention(Q, K, V, mask=causal_mask)
     else:
         mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
     
-        
     mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
     
     bu_err = target - mu  # B, T, D
