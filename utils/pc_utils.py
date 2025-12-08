@@ -198,8 +198,7 @@ def step_attn(
 
     # !! Causal Mask
     if flash:
-        # TODO: add support for causal masking in flash attention
-        mu_heads = apply_flash_attention(Q, K, V)
+        mu_heads = apply_flash_attention(Q, K, V, mask=causal_mask)
     else:
         mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
     
