@@ -8,7 +8,7 @@ from utils.pc_utils import cleanup_memory
 from utils.model_utils import set_seed
 from model_architecture.pc_t_model import PCTransformer
 from predictive_coding.config import GPTConfig
-from tuning.config import get_dynamic_model_config, update_global_config
+from tuning.config import get_dynamic_model_config
 from tuning.tuning_logs import log_trial_to_detailed_log, trial_batch_logger
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -57,7 +57,6 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             config_dict = broadcast_config(config_dict, device)
         
         config = GPTConfig(**config_dict)
-        update_global_config(config.__dict__)
 
         model = PCTransformer(config).to(device)  
        
