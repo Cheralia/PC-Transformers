@@ -4,7 +4,8 @@ import torch.nn.functional as F
 import gc
 from typing import Optional, Tuple, Any
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
-    
+from predictive_coding.lateral_connc import LateralConnections
+
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
     return torch.randn(batch_size, seq_len, embedding_size, device = device)
@@ -67,7 +68,7 @@ def step_linear(
     target: torch.Tensor,
     x: torch.Tensor,
     layer: nn.Module,
-    lateral_conn: Optional[Any], 
+    lateral_conn: LateralConnections, 
     layer_type: str,
     local_lr: float,
     clamp_value: float,
@@ -94,16 +95,13 @@ def step_linear(
     error_proj= bu_err @ layer.weight      
     error = error_proj- td_err if td_err is not None else error_proj  
     
-    if lateral_conn is not None:
-        delta_x = lateral_conn.forward(x, error)
-        x_new = x + local_lr * delta_x
+    delta_x = lateral_conn.forward(x, error)
+    x_new = x + local_lr * delta_x
 
-        if requires_update:
-            lateral_conn.update_weights(x.detach())
-    else:
-        x_new = x + local_lr * error 
+    if requires_update:
+        lateral_conn.update_weights(x.detach())
 
-    x_new = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
+    x_new = torch.clamp(x_new, -abs(clamp_value), abs(clamp_value))
     
     # parameter updates for the layer
     if requires_update:
@@ -126,7 +124,7 @@ def step_attn(
     T: int,
     target: torch.Tensor,
     x: torch.Tensor,
-    lateral_conn: Optional[Any],
+    lateral_conn: LateralConnections,
     proj_layers: dict,
     layer_type: str,
     local_lr: float,
@@ -192,16 +190,13 @@ def step_attn(
     bu_err = target - mu  # B, T, D
     error = bu_err - td_err if td_err is not None else bu_err  
                 
-    if lateral_conn is not None:
-        delta_x = lateral_conn.forward(x, error)
-        x_new = x + local_lr * delta_x
-        
-        if requires_update:
-            lateral_conn.update_weights(x.detach())
-    else:
-        x_new = x + local_lr * error
+    delta_x = lateral_conn.forward(x, error)
+    x_new = x + local_lr * delta_x
+    
+    if requires_update:
+        lateral_conn.update_weights(x.detach())
 
-    x_new = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
+    x_new = torch.clamp(x_new, -abs(clamp_value), abs(clamp_value))
 
     # PC update W_latent
     if requires_update:
@@ -217,9 +212,9 @@ def step_attn(
                 k_slice = K_update[:, h, :, :]
                 v_slice = V_update[:, h, :, :]
                 
-                dW_q_h = torch.einsum("bsd,bse->de", q_slice, x) / (B * S)
-                dW_k_h = torch.einsum("bsd,bse->de", k_slice, x) / (B * S)
-                dW_v_h = torch.einsum("bsd,bse->de", v_slice, x) / (B * S)
+                dW_q_h = torch.einsum("bsd,bse->de", q_slice, x.detach()) / (B * S)
+                dW_k_h = torch.einsum("bsd,bse->de", k_slice, x.detach()) / (B * S)
+                dW_v_h = torch.einsum("bsd,bse->de", v_slice, x.detach()) / (B * S)
 
                 start = h * head_dim
                 end = (h + 1) * head_dim

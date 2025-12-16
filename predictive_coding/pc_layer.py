@@ -40,11 +40,14 @@ class PCLayer(nn.Module):
         self._energy = 0.0
         self._errors = []
     
-    def register_lateral(self, layer_type: str, size: int):
+    def register_lateral(self, layer_type: str, size: int, device: torch.device):
         """Create and register lateral connections for layer_type."""
-        if layer_type not in self.lateral_connections:
-            self.lateral_connections[layer_type] = LateralConnections(size, self.local_lr)
-            self.add_module(f"lateral_{layer_type}", self.lateral_connections[layer_type])
+        if layer_type in self.lateral_connections:
+            return
+        
+        lateral = LateralConnections(size, self.local_lr).to(device)
+        self.lateral_connections[layer_type] = lateral
+        self.add_module(f"lateral_{layer_type}", lateral)
 
     def _reset_step_state(self) -> None:
         """Reset step-local accumulators, kept for future extension."""
@@ -101,7 +104,9 @@ class PCLayer(nn.Module):
             return mu_word, mu_pos
         
         elif layer_type == "attn":
-            lateral_conn = self.lateral_connections.get(layer_type, None)
+            assert layer_type in self.lateral_connections, "Lateral connection for {layer_type} not registered"
+            lateral_conn = self.lateral_connections[layer_type]
+            
             x, mu, bu_err, new_kv_cache = step_attn(
                 t,
                 T,
@@ -126,7 +131,9 @@ class PCLayer(nn.Module):
                 self._last_kv_cache = new_kv_cache
         
         else:
-            lateral_conn = self.lateral_connections.get(layer_type, None)
+            assert layer_type in self.lateral_connections, "Lateral connection for {layer_type} not registered"
+            lateral_conn = self.lateral_connections[layer_type]
+            
             x, mu, bu_err = step_linear(
                 t,
                 T,
@@ -191,20 +198,15 @@ class PCLayer(nn.Module):
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
             H_out = proj_layers["v_proj"].weight.shape[0] 
-            self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
             
-            self.register_lateral(layer_type, H_in)
-            if layer_type in self.lateral_connections:
-                self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
-        
+            self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
+            self.register_lateral(layer_type, H_in, device)
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
-            self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
             
-            self.register_lateral(layer_type, input_dim)  
-            if layer_type in self.lateral_connections:
-                self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
+            self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
+            self.register_lateral(layer_type, input_dim, device)  
     
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
         """Get the cached activity tensor for a given layer type."""
