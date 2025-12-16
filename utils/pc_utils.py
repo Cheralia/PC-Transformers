@@ -56,9 +56,6 @@ def step_embed(
             
             word_layer.weight.data.index_add_(0, flat_input_ids, delta)
             pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
-            
-    if t == T - 1:
-           finalize_step(mu, target, error, t, layer_type, energy_fn_name)
   
     return mu, mu_word, mu_pos, error
     
@@ -113,9 +110,6 @@ def step_linear(
             delta_b = local_lr * bu_err.mean(dim=(0, 1))
             # delta_b = torch.clamp(delta_b, -clamp_value, clamp_value)
             layer.bias.data.add_(delta_b)
-
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name)
 
     return x_new, mu, bu_err
 
@@ -239,9 +233,6 @@ def step_attn(
                     delta_b_v = (v_slice.mean(dim=(0, 1)) / (B * S))
                     # v_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_v, -clamp_value, clamp_value)
                     v_proj.bias.data[start:end] += local_lr * delta_b_v
- 
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name)
      
     return x_new, mu, bu_err, new_kv_cache
     
