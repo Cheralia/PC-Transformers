@@ -20,7 +20,6 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     peak_lr = trial.suggest_float('peak_lr', 1e-5, 1e-2, log=True)
     lr = peak_lr * 0.1 
     warmup_steps = trial.suggest_int('warmup_steps', 50, 2000, log=True)
-    update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
     batch_size = trial.suggest_categorical('batch_size', [4, 8, 16, 32])
     combined_internal_weight = trial.suggest_float('combined_internal_weight', 0.1, 0.9)
     combined_output_weight = 1.0 - combined_internal_weight
@@ -40,7 +39,6 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         n_blocks=n_blocks,
         batch_size = batch_size,
         num_epochs=num_epochs,
-        update_bias=update_bias,
         internal_energy_fn_name="pc_e",
         output_energy_fn_name="pc_e",
         combined_internal_weight = combined_internal_weight,
@@ -54,7 +52,7 @@ def update_global_config(config):
     config_keys = [
         'num_heads', 'n_embed', 'block_size', 'n_blocks', 'vocab_size',
         'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
-        'update_bias', 'T', 'internal_energy_fn_name', 'output_energy_fn_name',
+        'T', 'internal_energy_fn_name', 'output_energy_fn_name',
         'batch_size', 'num_epochs', 'combined_internal_weight', 
         'combined_output_weight', 'alpha'
     ]

@@ -15,7 +15,6 @@ warmup_steps: 369
 n_embed: 160
 dropout: 0.4546369920173881
 T: 2
-update_bias: False
 num_heads: 10
 n_blocks: 3
 batch_size: 8
