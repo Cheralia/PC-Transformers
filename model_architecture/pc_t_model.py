@@ -73,17 +73,6 @@ class PCTransformer(nn.Module):
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
         # Initialize all predictive coding layers
-        self.embedding.pc_layer.init_x(
-            batch_size=B,
-            seq_len=S,
-            layer_type="embed",
-            device = device,
-            layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
-            proj_layers=None,
-            input_ids=input_ids,
-            position_ids=position_ids,
-        )
-
         for block in self.blocks:
             block.attn.pc_qkv.init_x(
                 batch_size=B,
