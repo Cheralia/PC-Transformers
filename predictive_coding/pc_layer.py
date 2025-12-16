@@ -29,7 +29,7 @@ class PCLayer(nn.Module):
         self.T = T
         self.local_lr = lr
         self.update_bias = update_bias
-        self.clamp_value = 3.0
+        self.clamp_value = 1.0
         self.energy_fn_name = energy_fn_name 
         self.num_heads = num_heads
         self.n_embed = n_embed

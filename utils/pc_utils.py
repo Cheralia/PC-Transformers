@@ -7,7 +7,7 @@ from utils.attention_utils import apply_flash_attention, apply_standard_attentio
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
-    return torch.randn(batch_size, seq_len, embedding_size, device = device)
+    return torch.randn(batch_size, seq_len, embedding_size, device = device) *
 
 def step_embed(
     t: int,
@@ -53,7 +53,7 @@ def step_embed(
             flat_position_ids = position_ids.reshape(-1)
             
             delta = local_lr * flat_update
-            delta = torch.clamp(delta, -0.01, 0.01)
+            # delta = torch.clamp(delta, -clamp_value, clamp_value)
             
             word_layer.weight.data.index_add_(0, flat_input_ids, delta)
             pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
@@ -120,11 +120,12 @@ def step_linear(
     # parameter updates for the layer
     if requires_update:
         delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
-        delta_W = torch.clamp(delta_W, -0.01, 0.01)
+        # delta_W = torch.clamp(delta_W, -clamp_value, clamp_value)
         layer.weight.data.add_(delta_W)
+        
         if layer.bias is not None and update_bias:
             delta_b = local_lr * bu_err.mean(dim=(0, 1))
-            delta_b = torch.clamp(delta_b, -0.01, 0.01)
+            # delta_b = torch.clamp(delta_b, -clamp_value, clamp_value)
             layer.bias.data.add_(delta_b)
 
     if t == T - 1:
@@ -239,20 +240,27 @@ def step_attn(
                 start = h * head_dim
                 end = (h + 1) * head_dim
                 
-                q_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_q_h, -clamp_value, clamp_value)
-                k_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_k_h, -clamp_value, clamp_value)
-                v_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_v_h, -clamp_value, clamp_value)
+                # q_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_q_h, -clamp_value, clamp_value)
+                # k_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_k_h, -clamp_value, clamp_value)
+                # v_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_v_h, -clamp_value, clamp_value)
                 
+                q_proj.weight.data[start:end, :] += local_lr * dW_q_h
+                k_proj.weight.data[start:end, :] += local_lr * dW_k_h
+                v_proj.weight.data[start:end, :] += local_lr * dW_v_h
+
                 if update_bias:
                     if q_proj.bias is not None:
                         delta_b_q = (q_slice.mean(dim=(0, 1)) / (B * S))
-                        q_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_q, -clamp_value, clamp_value)
+                        # q_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_q, -clamp_value, clamp_value)
+                        q_proj.bias.data[start:end] += local_lr * delta_b_q
                     if k_proj.bias is not None:
                         delta_b_k = (k_slice.mean(dim=(0, 1)) / (B * S))
-                        k_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_k, -clamp_value, clamp_value)
+                        # k_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_k, -clamp_value, clamp_value)
+                        k_proj.bias.data[start:end] += local_lr * delta_b_k
                     if v_proj.bias is not None:
                         delta_b_v = (v_slice.mean(dim=(0, 1)) / (B * S))
-                        v_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_v, -clamp_value, clamp_value)
+                        # v_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_v, -clamp_value, clamp_value)
+                        v_proj.bias.data[start:end] += local_lr * delta_b_v
  
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type,energy_fn_name)
