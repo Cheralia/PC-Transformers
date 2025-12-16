@@ -142,7 +142,6 @@ class PCTransformer(nn.Module):
                 requires_update=True,
                 td_err= td_mlp2,
                 layer=self.output.output,
-                layer_norm=None,
                 proj_layers=None,
                 input_ids=None,
                 position_ids=None,
@@ -158,10 +157,6 @@ class PCTransformer(nn.Module):
                     if idx < len(self.blocks) - 1
                     else self.output.pc_layer.get_x("linear_output")
                 )
-                
-                layer_norm2 = (block.ln2
-                   if idx < len(self.blocks) - 1
-                    else None)
                 td_mlp1 = block.mlp.pc_layer1.get_td_err("fc1") if t > 0 else None
 
                 # Execute MLP layer 2
@@ -176,7 +171,6 @@ class PCTransformer(nn.Module):
                     requires_update=True,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
-                    layer_norm=layer_norm2,
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
@@ -197,7 +191,6 @@ class PCTransformer(nn.Module):
                     requires_update=True,
                     td_err= td_attn_op,
                     layer=block.mlp.fc1,
-                    layer_norm=block.ln1, 
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
@@ -225,7 +218,6 @@ class PCTransformer(nn.Module):
                     requires_update=True,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
-                    layer_norm=block.ln1,
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
@@ -245,7 +237,6 @@ class PCTransformer(nn.Module):
                     requires_update=True,
                     td_err= td_embed,
                     layer = None,
-                    layer_norm=block.ln2,
                     proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
                     input_ids=None,
                     position_ids=None,
@@ -270,7 +261,6 @@ class PCTransformer(nn.Module):
                 requires_update=True,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
-                layer_norm= block.ln2,
                 proj_layers=None,
                 input_ids=input_ids,
                 position_ids=position_ids,

@@ -62,7 +62,6 @@ class PCLayer(nn.Module):
         requires_update: bool,
         td_err:  Optional[torch.Tensor] = None,
         layer: Optional[nn.Module] = None,
-        layer_norm: Optional[nn.Module] = None,
         proj_layers: Optional[dict] = None,
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
@@ -87,7 +86,6 @@ class PCLayer(nn.Module):
                 self.clamp_value,
                 self.energy_fn_name,
                 requires_update,
-                layer_norm=layer_norm,
             )            
             # store for later retrieval
             self._x_cache["embed"] = (mu_word, mu_pos)
@@ -119,7 +117,6 @@ class PCLayer(nn.Module):
                 self.num_heads,
                 self.n_embed,
                 td_err=td_err, 
-                layer_norm=layer_norm,
                 flash=flash, 
                 kv_cache=kv_cache,  
                 use_cache=use_cache,
@@ -143,7 +140,6 @@ class PCLayer(nn.Module):
                 self.energy_fn_name, 
                 requires_update,
                 td_err=td_err, 
-                layer_norm=layer_norm
             )
             
         # cache and stats
