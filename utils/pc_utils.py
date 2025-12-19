@@ -32,19 +32,26 @@ def step_embed(
     
     # clip ids
     vocab_size = word_layer.weight.size(0)
-    if input_ids.max() >= vocab_size:
-        input_ids = torch.clamp(input_ids, max=vocab_size-1)
+    # Fourth time this is being done!!
+    # if input_ids.max() >= vocab_size:
+    #     input_ids = torch.clamp(input_ids, max=vocab_size-1)
     max_pos = pos_layer.weight.size(0)
-    if position_ids.max() >= max_pos:
-        position_ids = torch.clamp(position_ids, max=max_pos-1)
+    # if position_ids.max() >= max_pos:
+    #     position_ids = torch.clamp(position_ids, max=max_pos-1)
+    assert input_ids.max() <= vocab_size
+    # print("Input IDs max:", input_ids.max())
+    # print("Position IDs max:", position_ids.max())
+    # print("Max Position IDs:", max_pos)
+
+    assert position_ids.max() <= max_pos
          
     mu_word = word_layer(input_ids)
     mu_pos = pos_layer(position_ids)
-        
+    print(f"    [Forward] Embed: Computed mu")
     mu = mu_word + mu_pos
-    mu_norm=layer_norm(mu) if layer_norm is not None else mu
+    # mu_norm=layer_norm(mu) if layer_norm is not None else mu
 
-    error = target - mu_norm
+    error = target - mu
         
     if requires_update: 
         with torch.no_grad():
@@ -52,6 +59,7 @@ def step_embed(
             flat_update = error.reshape(-1, error.size(-1))
             flat_position_ids = position_ids.reshape(-1)
             
+            print(f"    [Latent Update] Embed: Updating weights based on error")
             delta = local_lr * flat_update
             delta = torch.clamp(delta, -0.01, 0.01)
             
@@ -84,18 +92,20 @@ def step_linear(
     Returns: (updated_x, mu, bu_err)
     """
     if layer_norm is not None and layer_type == "fc1":
+        print(f"    Values: Applied LayerNorm to input of {layer_type}")
         x_input = layer_norm(x)
-    elif layer_type == "fc2":
-        x_input = F.gelu(x)
+    # elif layer_type == "fc2":
+    #     x_input = F.gelu(x)
     else:
         x_input = x
         
+    print(f"    [Forward] {layer_type}: Computing mu from x")
     mu = layer(x_input)
         
     if layer_type == "fc1":
         mu = F.gelu(mu)
-    elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
-        mu = layer_norm(mu)
+    # elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
+    #     mu = layer_norm(mu)
             
     if layer_type=="linear_output":
         bu_err= target - F.softmax(mu, dim=-1) 
@@ -113,6 +123,7 @@ def step_linear(
         if requires_update:
             lateral_conn.update_weights(x.detach())
     else:
+        print(f"    [Latent Update] {layer_type}: Updating x via error")
         x= x + local_lr * error 
 
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
@@ -162,7 +173,11 @@ def step_attn(
 
     device = x.device
     
-    x_norm=layer_norm(x) if layer_norm is not None else x
+    if layer_norm is not None:
+        print(f"    Values: Applied LayerNorm to input of {layer_type}")
+        x_norm = layer_norm(x)
+    else:
+        x_norm = x
         
     q_proj = proj_layers["q_proj"]
     k_proj = proj_layers["k_proj"]
@@ -172,6 +187,7 @@ def step_attn(
     batch_size, seq_len, embed_dim = target.shape
     head_dim = n_embed // num_heads
    
+    print(f"    [Forward] {layer_type}: Computing Q, K, V")
     Q= q_proj(x_norm)
     
     # KV Cache logic: only compute K,V for new tokens if cache exists
@@ -214,6 +230,7 @@ def step_attn(
         if requires_update:
             lateral_conn.update_weights(x.detach())
     else:
+        print(f"    [Latent Update] {layer_type}: Updating x via error")
         x = x + local_lr * error
 
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
