@@ -29,14 +29,37 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
 
 """
 
+def print_model_details(model):
+    print("\n" + "="*50)
+    print(f"Model: {model.__class__.__name__}")
+    print("="*50)
+    
+    total_params = 0
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            stats = f"min={param.min():.4f}, max={param.max():.4f}, mean={param.mean():.4f}, std={param.std():.4f}"
+            print(f"{name:<50} | shape={str(tuple(param.shape)):<20} | {stats}")
+            total_params += param.numel()
+    
+    print("-" * 50)
+    print(f"Total Trainable Parameters: {total_params}")
+    print("="*50)
+    
+    print("\nModules:")
+    for name, module in model.named_modules():
+        print(f"{name}: {module}")
+    print("="*50 + "\n")
+
 def train(model, dataloader, config, global_step, device, logger):
     model.train()
     total_ce_loss = 0.0
     total_energy = 0.0
     batch_count = 0
 
+    # TODO: Both variables NOT used again
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
+    print_model_details(base_model)
     
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"].to(device)
@@ -44,6 +67,8 @@ def train(model, dataloader, config, global_step, device, logger):
 
         # total_steps = len(dataloader) * config.num_epochs
         
+
+        # This is already done in the pc-t-model
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size - 1)
 
@@ -201,6 +226,9 @@ def main():
                     find_unused_parameters=True)
 
         model.module.register_all_lateral_weights()
+    # else:
+    #     model.register_all_lateral_weights()
+
 
     train_loader, valid_loader, _ = get_loaders(distributed=use_ddp)
     
