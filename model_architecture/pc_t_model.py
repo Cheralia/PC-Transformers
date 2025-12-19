@@ -22,6 +22,7 @@ class PCTransformer(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_blocks)])
         self.output = OutputLayer(config)
 
+    # There is another register_all_lateral_weights in pc_layer.py
     def register_all_lateral_weights(self):
         """
         Register lateral weights for all predictive coding layers in the model.
@@ -60,6 +61,8 @@ class PCTransformer(nn.Module):
 
         B, S = input_ids.shape
         device = input_ids.device
+
+        # Why is it being fetched fron there???
         vocab_size = self.output.config.vocab_size
         
         # Clip input_ids and target_ids to valid range before using them
@@ -140,6 +143,7 @@ class PCTransformer(nn.Module):
         use_cuda, streams_or_futures = create_streams_or_futures(device, len(self.blocks) * 4 + 2)
 
         for t in range(self.config.T):
+            print(f"Inference Step: {t}/{self.config.T - 1}")
             # Execute output layer
             td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
             execute_parallel(
@@ -160,6 +164,7 @@ class PCTransformer(nn.Module):
                 flash=False
 
             )
+            print(f"  Running Output Layer (Inference Step {t})")
 
             # Iterate through blocks in reverse order for parallel execution
             for idx in range(len(self.blocks) - 1, -1, -1):
@@ -169,10 +174,10 @@ class PCTransformer(nn.Module):
                     if idx < len(self.blocks) - 1
                     else self.output.pc_layer.get_x("linear_output")
                 )
-                
-                layer_norm2 = (block.ln2
-                   if idx < len(self.blocks) - 1
-                    else None)
+                print(f"    Block {idx}: Running MLP Layer 2")
+                # MLP Layer 2 (Output of Block)
+                # Input: Post-GELU from FC1. Output: Pre-LN for Next Block.
+                # No LN on input (it's internal). No LN on output.
                 td_mlp1 = block.mlp.pc_layer1.get_td_err("fc1") if t > 0 else None
 
                 # Execute MLP layer 2
@@ -187,7 +192,7 @@ class PCTransformer(nn.Module):
                     requires_update=True,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
-                    layer_norm=layer_norm2,
+                    layer_norm=None,
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
@@ -195,6 +200,8 @@ class PCTransformer(nn.Module):
 
                 )
                 td_attn_op = block.attn.pc_output.get_td_err("linear_attn") if t > 0 else None
+
+                print(f"    Block {idx}: Running MLP Layer 1")
 
                 # Execute MLP layer 1
                 execute_parallel(
@@ -208,7 +215,7 @@ class PCTransformer(nn.Module):
                     requires_update=True,
                     td_err= td_attn_op,
                     layer=block.mlp.fc1,
-                    layer_norm=block.ln1, 
+                    layer_norm=block.ln2, 
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
@@ -225,6 +232,7 @@ class PCTransformer(nn.Module):
 
     
                 # Execute attention output
+                print(f"    Block {idx}: Running Attention Output")
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
@@ -236,7 +244,7 @@ class PCTransformer(nn.Module):
                     requires_update=True,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
-                    layer_norm=block.ln1,
+                    layer_norm=None,
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
@@ -245,6 +253,7 @@ class PCTransformer(nn.Module):
                 )
 
                 # Execute attention QKV
+                print(f"    Block {idx}: Running Attention QKV")
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
@@ -256,7 +265,7 @@ class PCTransformer(nn.Module):
                     requires_update=True,
                     td_err= td_embed,
                     layer = None,
-                    layer_norm=block.ln2,
+                    layer_norm=block.ln1,
                     proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
                     input_ids=None,
                     position_ids=None,
@@ -270,6 +279,7 @@ class PCTransformer(nn.Module):
                     block.attn.kv_cache = block.attn.pc_qkv._last_kv_cache
     
             # Execute embedding layer
+            print(f"  Running Embedding Layer (Inference Step {t})")
             execute_parallel(
                 use_cuda,
                 streams_or_futures,
@@ -281,7 +291,7 @@ class PCTransformer(nn.Module):
                 requires_update=True,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
-                layer_norm= block.ln2,
+                layer_norm=None,
                 proj_layers=None,
                 input_ids=input_ids,
                 position_ids=position_ids,
