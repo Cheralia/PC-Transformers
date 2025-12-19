@@ -184,6 +184,7 @@ class PCLayer(nn.Module):
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
             vocab_size = layer["word"].weight.size(0)
+            # TODO: Third time this is being done!!
             if input_ids.max() >= vocab_size:
                 input_ids = torch.clamp(input_ids, max=vocab_size-1)
             
