@@ -87,7 +87,7 @@ def step_embed(
             
     if t == T - 1:
            finalize_step(mu, target, error, t, layer_type, energy_fn_name)
-    return mu, mu_word, None, error
+    return mu, mu_word, error
 
 def step_linear(
     t: int,
@@ -260,10 +260,23 @@ def step_attn(
                 k_proj.weight.data[s:e] += torch.clamp(local_lr * dWk, -clamp_value, clamp_value)
                 v_proj.weight.data[s:e] += torch.clamp(local_lr * dWv, -clamp_value, clamp_value)
 
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type, energy_fn_name)
+                if update_bias:
+                    if q_proj.bias is not None:
+                        delta_b_q = qh.mean(dim=(0, 1))
+                        q_proj.bias.data[s:e] += torch.clamp(local_lr * delta_b_q, -clamp_value, clamp_value)
+                    if k_proj.bias is not None:
+                        delta_b_k = kh.mean(dim=(0, 1))
+                        k_proj.bias.data[s:e] += torch.clamp(local_lr * delta_b_k, -clamp_value, clamp_value)
+                    if v_proj.bias is not None:
+                        delta_b_v = vh.mean(dim=(0, 1))
+                        v_proj.bias.data[s:e] += torch.clamp(local_lr * delta_b_v, -clamp_value, clamp_value)
 
-    return x, mu, bu_err, (K.detach(), V.detach()) if use_cache else None
+    if t == T - 1:
+        finalize_step(mu, target, error, t, layer_type,energy_fn_name)
+    
+    new_kv_cache = (K.detach(), V.detach()) if use_cache else None
+
+    return x, mu, bu_err, new_kv_cache
 
 ENERGY_FUNCTIONS = {
     "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,    
@@ -272,7 +285,7 @@ ENERGY_FUNCTIONS = {
     ),
 }
 
-def energy_fn(mu: torch.Tensor, x: torch.Tensor, energy_fn_name: str) -> torch.Tensor:
+def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
     if energy_fn_name not in ENERGY_FUNCTIONS:
         raise ValueError(f"Unknown energy function: {energy_fn_name}. Choose from {list(ENERGY_FUNCTIONS.keys())}")
     return ENERGY_FUNCTIONS[energy_fn_name](mu, x)

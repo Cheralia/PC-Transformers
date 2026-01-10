@@ -83,7 +83,7 @@ class PCLayer(nn.Module):
 
 
         if layer_type == "embed":
-            mu, mu_word, mu_pos, bu_err = step_embed(
+            mu, mu_word, bu_err = step_embed(
                 t,
                 T,
                 target_activity,
@@ -97,7 +97,7 @@ class PCLayer(nn.Module):
                 layer_norm=layer_norm,
             )            
             # store for later retrieval
-            self._x_cache["embed"] = (mu_word, mu_pos)
+            self._x_cache["embed"] = (mu_word)
             self._mu_cache["embed"] = mu.detach().clone()
             if bu_err is not None:
                 self._error_cache["embed"] = bu_err.detach().clone()
@@ -107,7 +107,7 @@ class PCLayer(nn.Module):
             energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
             self._energy += energy
             self._errors.extend(step_errors)
-            return mu_word, mu_pos
+            return mu_word
         
         elif layer_type == "attn":
             lateral_conn = self.lateral_connections.get(layer_type, None)
